@@ -1,6 +1,6 @@
 {
-  "name": "MboaSchool Cameroun",
-  "short_name": "MboaSchool",
+  "name": "School's Cameroun",
+  "short_name": "School's",
   "description": "Système de gestion scolaire",
   "start_url": "/",
   "display": "standalone",

@@ -496,8 +496,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         {/* Rangée 1 : logo + contrôles */}
         <div className="flex items-center justify-between gap-4 px-4 lg:px-8 h-16">
           <Link href="/dashboard" className="flex items-center gap-2.5 shrink-0">
-            <div className="w-9 h-9 rounded-[12px] bg-ink text-cream flex items-center justify-center font-extrabold text-lg">M</div>
-            <span className="font-extrabold text-xl text-ink tracking-tight hidden sm:inline">MboaSchool</span>
+            <div className="w-9 h-9 rounded-[12px] bg-ink text-cream flex items-center justify-center font-extrabold text-lg">S</div>
+            <span className="font-extrabold text-xl text-ink tracking-tight hidden sm:inline">School&apos;s</span>
           </Link>
 
           <div className="flex items-center gap-2.5">

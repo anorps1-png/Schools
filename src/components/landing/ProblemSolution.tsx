@@ -31,7 +31,7 @@ export default function ProblemSolution() {
         <div className="grid md:grid-cols-2 gap-6 items-start">
           {/* Les Problèmes */}
           <div className="bg-red-bg rounded-card-lg p-8 border border-border">
-            <h3 className="text-lg font-extrabold text-accent mb-5">Avant MboaSchool</h3>
+            <h3 className="text-lg font-extrabold text-accent mb-5">Avant School&apos;s</h3>
             <ul className="space-y-3.5">
               {problems.map((p, i) => (
                 <li key={i} className="flex gap-3 text-sm text-ink-soft">
@@ -47,7 +47,7 @@ export default function ProblemSolution() {
             <div className="absolute -top-3 -right-3 bg-accent text-cream font-extrabold px-4 py-1 rounded-pill text-xs shadow-cta">
               La solution
             </div>
-            <h3 className="text-lg font-extrabold text-green mb-5">Avec MboaSchool</h3>
+            <h3 className="text-lg font-extrabold text-green mb-5">Avec School&apos;s</h3>
             <ul className="space-y-3.5">
               {solutions.map((s, i) => (
                 <li key={i} className="flex gap-3 text-sm text-ink-soft">

@@ -440,7 +440,7 @@ export default function BulletinImpressionPage({ params }: PageProps) {
         {/* Print Page Footer */}
         <div className="absolute bottom-5 left-8 right-8 border-t border-[#e9e1cf] pt-3 flex justify-between text-[8px] font-semibold text-[#a3947a]">
           <span>Fait à Yaoundé, le {new Date().toLocaleDateString('fr-FR')}</span>
-          <span>Généré par MboaSchool · document officiel de l'établissement</span>
+          <span>Généré par School's · document officiel de l'établissement</span>
         </div>
 
       </div>

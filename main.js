@@ -80,7 +80,7 @@ autoUpdater.on('update-downloaded', (info) => {
       defaultId: 0,
       cancelId: 1,
       title: 'Mise à jour prête',
-      message: `La version ${info.version} de MboaSchool a été téléchargée.`,
+      message: `La version ${info.version} de School's a été téléchargée.`,
       detail: 'Voulez-vous redémarrer l\'application maintenant pour appliquer la mise à jour ?'
     }).then(({ response }) => {
       if (response === 0) {
@@ -126,7 +126,7 @@ function setupMenu() {
           }
         },
         { type: 'separator' },
-        { role: 'quit', label: 'Quitter MboaSchool' }
+        { role: 'quit', label: "Quitter School's" }
       ]
     },
     {
@@ -162,14 +162,14 @@ function setupMenu() {
         },
         { type: 'separator' },
         {
-          label: 'À propos de MboaSchool',
+          label: "À propos de School's",
           click: () => {
             if (mainWindow) {
               dialog.showMessageBox(mainWindow, {
                 type: 'info',
-                title: 'À propos de MboaSchool',
-                message: `MboaSchool v${app.getVersion()}`,
-                detail: 'Gestion scolaire & comptable complète.\n© 2026 MboaSchool.'
+                title: "À propos de School's",
+                message: `School's v${app.getVersion()}`,
+                detail: "Gestion scolaire & comptable complète.\n© 2026 School's."
               });
             }
           }
@@ -278,7 +278,7 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true
     },
-    title: "MboaSchool - Gestion Scolaire",
+    title: "School's - Gestion Scolaire",
     autoHideMenuBar: false
   });
 

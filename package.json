@@ -50,7 +50,7 @@
   },
   "build": {
     "appId": "com.mboaschool.app",
-    "productName": "MboaSchool",
+    "productName": "School's",
     "asar": true,
     "asarUnpack": [
       "**/*.node",
@@ -83,7 +83,7 @@
       {
         "provider": "github",
         "owner": "anorps1-png",
-        "repo": "MboaSchool"
+        "repo": "Schools"
       }
     ],
     "win": {

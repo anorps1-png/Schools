@@ -3,8 +3,8 @@ import React from 'react';
 export default function FAQ() {
   const faqs = [
     {
-      q: "Est-ce que MboaSchool fonctionne sans connexion internet ?",
-      a: "Oui ! MboaSchool est capable de fonctionner en mode hors-ligne. Vous pouvez continuer à saisir des notes ou enregistrer des paiements sans internet. Une fois la connexion rétablie, toutes vos données seront automatiquement synchronisées dans la base de données de l'école. De plus, vous avez toujours la possibilité d'exporter l'ensemble de vos données sur Excel à tout moment.",
+      q: "Est-ce que School's fonctionne sans connexion internet ?",
+      a: "Oui ! School's est capable de fonctionner en mode hors-ligne. Vous pouvez continuer à saisir des notes ou enregistrer des paiements sans internet. Une fois la connexion rétablie, toutes vos données seront automatiquement synchronisées dans la base de données de l'école. De plus, vous avez toujours la possibilité d'exporter l'ensemble de vos données sur Excel à tout moment.",
     },
     {
       q: "Les données de mon école sont-elles en sécurité ?",
@@ -12,7 +12,7 @@ export default function FAQ() {
     },
     {
       q: "Si un autre établissement importe des données avec des structures similaires, y aura-t-il un conflit ?",
-      a: "Non, absolument aucun risque. MboaSchool s'appuie sur des politiques de sécurité au niveau des lignes (RLS) de Supabase. Chaque établissement dispose d'un espace hermétiquement cloisonné : il est impossible qu'un établissement accède aux données d'un autre ou provoque des conflits d'importation.",
+      a: "Non, absolument aucun risque. School's s'appuie sur des politiques de sécurité au niveau des lignes (RLS) de Supabase. Chaque établissement dispose d'un espace hermétiquement cloisonné : il est impossible qu'un établissement accède aux données d'un autre ou provoque des conflits d'importation.",
     },
     {
       q: "Que se passe-t-il si je décide de supprimer mon compte ?",

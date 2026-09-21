@@ -3394,7 +3394,7 @@ export default function RHPage() {
             </div>
 
             <div className="flex justify-between items-center text-[10px] text-ink-faint mt-6 pt-4 border-t border-border print:text-ink">
-              <span>MboaSchool Cameroon - Gestion Scolaire</span>
+              <span>School&apos;s Cameroon - Gestion Scolaire</span>
               <span>Signature Employé & Cachet Établissement</span>
             </div>
 

@@ -12,7 +12,7 @@ const bricolage = Bricolage_Grotesque({
 });
 
 export const metadata: Metadata = {
-  title: "MboaSchool Cameroun - Gestion Scolaire",
+  title: "School's Cameroun - Gestion Scolaire",
   description: "Prototype de SaaS de gestion scolaire pour les établissements d'enseignement secondaire au Cameroun.",
   manifest: "/manifest.json",
 };

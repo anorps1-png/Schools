@@ -870,7 +870,7 @@ export default function SettingsPage() {
             </div>
 
             <div className="text-[10px] text-ink-faint text-center leading-relaxed">
-              La gestion des abonnements n'est pas encore disponible dans cette version. Pour toute question sur votre licence, ajout de modules ou modification de quota d'élèves/parents, contactez le support MboaSchool.
+              La gestion des abonnements n'est pas encore disponible dans cette version. Pour toute question sur votre licence, ajout de modules ou modification de quota d'élèves/parents, contactez le support School&apos;s.
             </div>
           </div>
 

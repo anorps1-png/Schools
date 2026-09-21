@@ -20,7 +20,7 @@ export default function Hero() {
       </h1>
 
       <p className="mt-7 text-lg md:text-xl text-ink-soft font-medium max-w-2xl leading-relaxed animate-fade-up [animation-delay:0.16s]">
-        MboaSchool centralise les élèves, les enseignants, les paiements, les notes et les bulletins dans une seule plateforme, pensée pour les écoles camerounaises.
+        School&apos;s centralise les élèves, les enseignants, les paiements, les notes et les bulletins dans une seule plateforme, pensée pour les écoles camerounaises.
       </p>
 
       <div className="flex flex-col sm:flex-row justify-center gap-3.5 mt-10 animate-fade-up [animation-delay:0.24s]">

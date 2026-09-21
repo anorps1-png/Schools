@@ -24,8 +24,8 @@ export default function Footer() {
         <div className="grid md:grid-cols-4 gap-8 mb-10 border-b border-cream/10 pb-10">
           <div className="col-span-2">
             <div className="flex items-center gap-2.5 mb-4">
-              <div className="w-8 h-8 rounded-[10px] bg-accent text-cream flex items-center justify-center font-extrabold text-[15px]">M</div>
-              <span className="font-extrabold text-lg text-cream tracking-tight">MboaSchool</span>
+              <div className="w-8 h-8 rounded-[10px] bg-accent text-cream flex items-center justify-center font-extrabold text-[15px]">S</div>
+              <span className="font-extrabold text-lg text-cream tracking-tight">School&apos;s</span>
             </div>
             <p className="text-[#a89a7e] max-w-sm text-sm font-medium leading-relaxed">
               Le logiciel de gestion scolaire conçu sur-mesure pour les réalités des collèges et lycées du Cameroun.
@@ -50,7 +50,7 @@ export default function Footer() {
         </div>
 
         <div className="text-center text-[#a89a7e] text-sm font-medium">
-          © {new Date().getFullYear()} MboaSchool · Yaoundé, Cameroun · Fait avec soin pour les écoles d&apos;Afrique centrale
+          © {new Date().getFullYear()} School&apos;s · Yaoundé, Cameroun · Fait avec soin pour les écoles d&apos;Afrique centrale
         </div>
       </div>
     </footer>

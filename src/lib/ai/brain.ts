@@ -61,7 +61,7 @@ const ALLOWED_TABLES = new Set([
 ]);
 
 function buildSystemPrompt(fileContext?: string) {
-  return `Tu es le Cerveau IA de gestion scolaire de l'établissement actuellement ouvert par l'utilisateur, sur l'application MboaSchool.
+  return `Tu es le Cerveau IA de gestion scolaire de l'établissement actuellement ouvert par l'utilisateur, sur l'application School's.
 
 Tu as accès en LECTURE à toutes les données de CETTE école (élèves, classes, notes, bulletins, paiements, tranches de scolarité, personnel enseignant et RH, comptabilité, discipline, emploi du temps). Les autorisations d'accès (RLS) garantissent déjà que tu ne peux jamais voir les données d'une autre école, même si on te le demande.
 

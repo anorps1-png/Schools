@@ -482,9 +482,9 @@ function LoginContent() {
       <div className="w-full max-w-md bg-surface border border-border rounded-card-lg p-8 sm:p-11 shadow-login animate-fade-up">
         {/* En-tête logo */}
         <div className="flex items-center gap-3 mb-2">
-          <div className="w-11 h-11 rounded-[14px] bg-ink text-cream flex items-center justify-center font-extrabold text-xl">M</div>
+          <div className="w-11 h-11 rounded-[14px] bg-ink text-cream flex items-center justify-center font-extrabold text-xl">S</div>
           <div>
-            <div className="font-extrabold text-[22px] text-ink tracking-[-0.5px] leading-none">MboaSchool</div>
+            <div className="font-extrabold text-[22px] text-ink tracking-[-0.5px] leading-none">School&apos;s</div>
             <div className="text-xs text-ink-faint font-semibold mt-1">Gestion scolaire · Cameroun</div>
           </div>
         </div>
