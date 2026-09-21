@@ -52,3 +52,6 @@ next-env.d.ts
 
 # scratch files
 /scratch/
+
+# claude code local settings (personal, not team-wide)
+/.claude/settings.local.json
