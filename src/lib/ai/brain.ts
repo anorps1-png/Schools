@@ -69,10 +69,28 @@ RÈGLE ABSOLUE — AUCUNE ÉCRITURE DIRECTE : tu n'as pas le pouvoir de modifier
 
 Tables accessibles via 'query_data' : ${Array.from(ALLOWED_TABLES).join(', ')}.
 
+Structure des tables clés :
+- classes : id, nom, niveau, section, prix (frais de scolarité), frais_inscription, annee_scolaire_id, section_id
+- eleves : id, matricule, nom, prenom, sexe, classe_id, annee_scolaire_id, statut, deleted_at
+- tranches_scolarite : id, nom, date_limite, montant, pourcentage, classe_id, annee_scolaire_id
+- paiements : id, eleve_id, montant, date, type_frais, statut, tranche_id, deleted_at (ATTENTION : paiements est lié à eleve_id, PAS directement à classe_id)
+- annees_scolaires : id, nom, date_debut, date_fin
+- sections : id, nom
+- enseignants / membres_personnel : id, nom, prenom, fonction, statut
+- fiches_de_paie : id, personnel_id, mois, annee, salaire_net, statut
+- notes : id, eleve_id, matiere_id, note, coef, evaluation_id
+- bulletins : id, eleve_id, classe_id, periode, moyenne, rang
+
 Consignes :
 - Réponds en français, de façon concise et professionnelle.
 - Utilise des tableaux Markdown pour présenter des données chiffrées.
 - Si une question porte sur des données que tu n'as pas encore consultées, appelle 'query_data' avant de répondre plutôt que de deviner.
+- Pour calculer les impayés d'une classe :
+  1. Identifie la classe dans 'classes' (ex: nom = 'SIL').
+  2. Récupère les élèves actifs dans 'eleves' (classe_id = id de la classe).
+  3. Récupère les tranches de scolarité de la classe dans 'tranches_scolarite' ou le prix dans 'classes'.
+  4. Récupère les paiements de ces élèves dans 'paiements' (filtre field: 'eleve_id', op: 'in', value: [...ids d'élèves]).
+  5. Calcule les impayés : montant attendu moins total payé par élève.
 - Si l'action demandée est ambiguë (quel élève, quelle classe, quel montant), demande une précision au lieu de proposer une action au hasard.
 - Avant de proposer une suppression, vérifie via 'query_data' si d'autres enregistrements en dépendent encore (ex. des élèves rattachés à la classe ou à l'année scolaire à supprimer) : la base refusera la suppression tant que ces liens existent. Si des dépendances existent, explique-le à l'utilisateur et propose plutôt de les retirer/réaffecter d'abord.
 ${fileContext ? `\n--- DOCUMENT JOINT PAR L'UTILISATEUR (à analyser) ---\n${fileContext}\n--- FIN DU DOCUMENT ---\n` : ''}`;
@@ -128,14 +146,35 @@ async function execQueryData(supabase: SupabaseClient, args: any) {
 // Certains fournisseurs (observé avec DeepSeek) renvoient parfois, au lieu
 // d'un vrai appel de fonction structuré, le pseudo-format XML/tokens spéciaux
 // de leur propre gabarit d'appel d'outil directement dans le texte de
-// réponse (ex. des tokens `｜tool_calls｜`/`<invoke name=...>`). Ce texte brut
-// ne doit JAMAIS être affiché tel quel à l'utilisateur : il ressemble à une
-// action (parfois destructrice) déjà décidée alors qu'aucun outil réel n'a
-// été invoqué et qu'aucune proposition structurée n'a été créée.
-const TOOL_LEAK_PATTERN = /[｜]|<\/?invoke\b|<\/?parameter\b|tool[_▁]calls?\s*>/i;
+// réponse (ex. des tokens `<｜｜DSML｜｜ calls>`/`<invoke name=...>`). Ce texte brut
+// ne doit pas être affiché tel quel à l'utilisateur : il est soit intercepté et exécuté
+// s'il s'agit d'un appel d'outil valide, soit filtré avant affichage.
+const TOOL_LEAK_PATTERN = /<[｜|]?[_\s]*DSML[_\s]*[｜|]?>|<\/?invoke\b|<\/?parameter\b|[<｜|][_\s]*tool[_▁\s]*calls?[_\s]*[>｜|]/i;
 
 function isLeakedToolSyntax(text: string): boolean {
   return typeof text === 'string' && TOOL_LEAK_PATTERN.test(text);
+}
+
+function tryParseLeakedToolCall(content: string): { name: string; args: any } | null {
+  if (!content || typeof content !== 'string') return null;
+  const invokeMatch = content.match(/<[^>]*invoke\s+name=["'](\w+)["'][^>]*>([\s\S]*?)<\/[^>]*invoke>/i);
+  if (!invokeMatch) return null;
+  const name = invokeMatch[1];
+  const body = invokeMatch[2];
+  const paramRegex = /<[^>]*parameter\s+name=["'](\w+)["'][^>]*>([\s\S]*?)<\/[^>]*parameter>/gi;
+  const args: Record<string, any> = {};
+  let m: RegExpExecArray | null;
+  while ((m = paramRegex.exec(body)) !== null) {
+    const key = m[1];
+    let val: any = m[2].trim();
+    if (val.startsWith('{') || val.startsWith('[')) {
+      try { val = JSON.parse(val); } catch {}
+    } else if (val === 'true') val = true;
+    else if (val === 'false') val = false;
+    else if (!isNaN(Number(val)) && val !== '') val = Number(val);
+    args[key] = val;
+  }
+  return { name, args };
 }
 
 const SAFE_FALLBACK_TEXT = "Le fournisseur IA a renvoyé une réponse mal formée (une syntaxe d'appel d'outil brute au lieu d'une réponse ou d'un appel de fonction valide). Aucune action n'a été proposée ni exécutée. Merci de reformuler votre demande, ou de réessayer.";
@@ -187,11 +226,18 @@ async function askOpenAiCompatible(
   let proposal: Proposal | null = null;
   let finalText: string | null = null;
   let iteration = 0;
-  const maxIterations = 6;
+  const maxIterations = 10;
 
   while (iteration < maxIterations && finalText === null) {
     iteration++;
-    const isLast = iteration >= maxIterations - 1;
+    const isLast = iteration >= maxIterations;
+    if (isLast && iteration > 1) {
+      messages.push({
+        role: 'user',
+        content: "C'est votre dernière étape : rédigez votre réponse finale récapitulative et complète pour l'utilisateur en français à partir de toutes les données déjà collectées ci-dessus. Ne faites plus d'appel d'outil.",
+      });
+    }
+
     const completion = await client.chat.completions.create({
       model,
       messages,
@@ -202,11 +248,11 @@ async function askOpenAiCompatible(
     const msg = completion.choices?.[0]?.message;
     if (!msg) throw new Error("L'API IA n'a retourné aucune réponse valide.");
 
+    const parsedTool = (!msg.tool_calls || msg.tool_calls.length === 0) ? tryParseLeakedToolCall(msg.content || '') : null;
+
     if (msg.tool_calls && msg.tool_calls.length > 0) {
       messages.push(msg);
-      // Tous les outils déclarés ci-dessus sont de type 'function' : seul ce
-      // variant possède `.function` (le SDK inclut aussi un type "custom tool"
-      // qu'on n'utilise jamais ici).
+      // Tous les outils déclarés ci-dessus sont de type 'function'
       for (const call of msg.tool_calls as any[]) {
         const args = JSON.parse(call.function.arguments || '{}');
         let toolResult: any;
@@ -221,12 +267,24 @@ async function askOpenAiCompatible(
         }
         messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(toolResult) });
       }
+    } else if (parsedTool && !isLast) {
+      // Exécuter l'outil récupéré depuis la syntaxe brute (fallback DSML / invoke)
+      let toolResult: any;
+      if (parsedTool.name === 'query_data') {
+        toolResult = await execQueryData(supabase, parsedTool.args);
+      } else if (parsedTool.name === 'propose_action') {
+        const p = buildProposalFromArgs(parsedTool.args);
+        if (p) { proposal = p; finalText = p.reason; }
+        toolResult = { success: true, note: 'Proposition enregistrée pour approbation humaine.' };
+      } else {
+        toolResult = { error: 'Outil inconnu.' };
+      }
+      messages.push({ role: 'assistant', content: msg.content || '' });
+      messages.push({
+        role: 'user',
+        content: `Données obtenues pour ${parsedTool.name} : ${JSON.stringify(toolResult)}. Poursuis ton analyse ou fournis la réponse finale en français sans balises techniques.`
+      });
     } else if (isLeakedToolSyntax(msg.content || '')) {
-      // Le modèle a renvoyé en texte brut une syntaxe d'appel d'outil non
-      // structurée au lieu d'un vrai tool_call — on ne la fait JAMAIS suivre
-      // à l'utilisateur. On retire le message fautif de l'historique envoyé
-      // au modèle (pour ne pas propager ses tokens spéciaux) et on lui
-      // demande explicitement de se corriger, avant de reboucler.
       captureMessage("AI brain: syntaxe d'appel d'outil non structurée reçue en texte brut (DeepSeek/OpenAI-compatible), correction demandée", { model, rawText: (msg.content || '').slice(0, 2000) });
       messages.push({ role: 'assistant', content: '[réponse invalide ignorée : format non conforme]' });
       messages.push({
@@ -404,7 +462,12 @@ export async function askBrain(
   }
   if (provider === 'deepseek') {
     if (!settings.deepseek_api_key) throw new Error("Clé API DeepSeek non configurée dans Paramètres.");
-    return askOpenAiCompatible(supabase, settings.deepseek_api_key, 'https://api.deepseek.com', settings.deepseek_model || 'deepseek-chat', systemPrompt, history, prompt);
+    const configuredModel = settings.deepseek_model?.trim();
+    // deepseek-chat est le modèle officiel supportant les outils / function calling sans tokens de raisonnement
+    const model = (!configuredModel || configuredModel === 'deepseek-v4-flash' || configuredModel.includes('reasoner'))
+      ? 'deepseek-chat'
+      : configuredModel;
+    return askOpenAiCompatible(supabase, settings.deepseek_api_key, 'https://api.deepseek.com', model, systemPrompt, history, prompt);
   }
   if (provider === 'openai') {
     if (!settings.openai_api_key) throw new Error("Clé API OpenAI (ChatGPT) non configurée dans Paramètres.");
