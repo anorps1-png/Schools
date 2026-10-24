@@ -223,7 +223,12 @@ async function getStudentsPaginated(params: any) {
       )
     : scored;
 
-  filtered.sort((a, b) => (a.nom || '').localeCompare(b.nom || '') || String(a.id).localeCompare(String(b.id)));
+  filtered.sort(
+    (a, b) =>
+      (a.nom || '').trim().localeCompare((b.nom || '').trim(), 'fr', { sensitivity: 'base' }) ||
+      (a.prenom || '').trim().localeCompare((b.prenom || '').trim(), 'fr', { sensitivity: 'base' }) ||
+      String(a.id).localeCompare(String(b.id))
+  );
 
   const totalCount = filtered.length;
   const offset = (page - 1) * pageSize;

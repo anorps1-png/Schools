@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useEtablissement } from '@/contexts/etablissement-context';
 import { getStudentsPerClass } from '@/lib/queries/classes';
 import TranchesConfig from '@/components/settings/TranchesConfig';
+import { printStudentList } from '@/lib/print/printStudentList';
 
 interface SupabaseClasse {
   id: string;
@@ -40,7 +41,7 @@ export default function ClassesPage() {
   const [editPrix, setEditPrix] = useState('');
   const [editFraisInscription, setEditFraisInscription] = useState('');
 
-  const { etablissementId, academicYearId } = useEtablissement();
+  const { etablissementId, academicYearId, academicYear } = useEtablissement();
   const supabase = useMemo(() => createClient(), []);
 
   useEffect(() => {
@@ -198,6 +199,52 @@ export default function ClassesPage() {
     setIsSubmitting(false);
   };
 
+  const handlePrintClass = async (cls: SupabaseClasse, event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    try {
+      const [{ data: elevesData }, { data: etabData }] = await Promise.all([
+        supabase
+          .from('eleves')
+          .select('*')
+          .eq('classe_id', cls.id)
+          .eq('etablissement_id', etablissementId),
+        supabase
+          .from('etablissements')
+          .select('nom, adresse, telephone, email, logo_url')
+          .eq('id', etablissementId)
+          .single()
+      ]);
+
+      printStudentList({
+        title: `LISTE OFFICIELLE DES ÉLÈVES`,
+        classeNom: cls.nom,
+        subtitle: `Section : ${cls.section || 'Francophone'} • Niveau : ${cls.niveau || '—'}`,
+        schoolName: etabData?.nom,
+        schoolAddress: etabData?.adresse,
+        schoolPhone: etabData?.telephone,
+        schoolEmail: etabData?.email,
+        schoolLogo: etabData?.logo_url,
+        academicYear: academicYear || undefined,
+        students: (elevesData || []).map((s: any) => ({
+          id: s.id,
+          matricule: s.matricule,
+          nom: s.nom,
+          prenom: s.prenom,
+          sexe: s.sexe,
+          dateNaissance: s.date_naissance,
+          lieuNaissance: s.lieu_naissance,
+          nomParent: s.nom_parent,
+          telephoneParent: s.telephone_parent,
+          classeNom: cls.nom,
+        })),
+      });
+    } catch (err: any) {
+      alert("Erreur lors de la préparation de l'impression : " + (err?.message || err));
+    }
+  };
+
   const handleDeleteClass = async (id: string, event: React.MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
@@ -286,6 +333,14 @@ export default function ClassesPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {classesList.map(cls => (
             <Link key={cls.id} href={`/classes/${encodeURIComponent(cls.id)}`} className="group block relative bg-surface p-6 rounded-card shadow-sm border border-border hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+              {/* Bouton d'impression (visible au hover) */}
+              <button
+                onClick={(e) => handlePrintClass(cls, e)}
+                className="absolute top-4 right-24 w-8 h-8 flex items-center justify-center bg-chip text-ink rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-chip-hover"
+                title="Imprimer la liste des élèves de cette classe"
+              >
+                🖨️
+              </button>
               {/* Bouton de modification (visible au hover) */}
               <button
                 onClick={(e) => handleStartEdit(cls, e)}

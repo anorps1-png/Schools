@@ -10,7 +10,7 @@ import {
 } from '@/components/icons';
 import { Eleve, Paiement, NoteMatiere, TransactionPaiement, Classe, DisciplineIncident } from '@/types/domain';
 import { createClient } from '@/lib/supabase/client';
-import { addPayment, updatePayment, softDeletePayment } from '@/lib/queries/eleves';
+import { addPayment, updatePayment, softDeletePayment, updateStudent } from '@/lib/queries/eleves';
 import { paiementSchema, validateOrThrow } from '@/lib/validation/schemas';
 import { useEtablissement } from '@/contexts/etablissement-context';
 
@@ -184,6 +184,88 @@ export default function FicheElevePage({ params }: PageProps) {
   const [newDisciplineSanction, setNewDisciplineSanction] = useState('');
   const [newDisciplineStatut, setNewDisciplineStatut] = useState('Non notifié');
 
+  // Form states for editing student general info
+  const [showEditInfoModal, setShowEditInfoModal] = useState(false);
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
+  const [editNom, setEditNom] = useState('');
+  const [editPrenom, setEditPrenom] = useState('');
+  const [editMatricule, setEditMatricule] = useState('');
+  const [editSexe, setEditSexe] = useState<'M' | 'F'>('M');
+  const [editClasseId, setEditClasseId] = useState('');
+  const [editDateNaissance, setEditDateNaissance] = useState('');
+  const [editLieuNaissance, setEditLieuNaissance] = useState('');
+  const [editNomParent, setEditNomParent] = useState('');
+  const [editTelephoneParent, setEditTelephoneParent] = useState('');
+  const [editEmailParent, setEditEmailParent] = useState('');
+  const [editStatut, setEditStatut] = useState<'actif' | 'suspendu'>('actif');
+
+  const handleOpenEditInfo = () => {
+    if (!student) return;
+    setEditNom(student.nom || '');
+    setEditPrenom(student.prenom || '');
+    setEditMatricule(student.matricule || '');
+    setEditSexe((student.sexe as 'M' | 'F') || 'M');
+    setEditClasseId(student.classeId || '');
+    setEditDateNaissance(student.dateNaissance || '');
+    setEditLieuNaissance(student.lieuNaissance || '');
+    setEditNomParent(student.nomParent || '');
+    setEditTelephoneParent(student.telephoneParent || '');
+    setEditEmailParent(student.emailParent === 'N/A' ? '' : (student.emailParent || ''));
+    setEditStatut((student.statut as any) === 'suspendu' ? 'suspendu' : 'actif');
+    setShowEditInfoModal(true);
+  };
+
+  const handleSaveEditInfo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!student) return;
+
+    if (!editNom.trim() || !editPrenom.trim() || !editMatricule.trim()) {
+      alert("Le nom, prénom et matricule sont obligatoires.");
+      return;
+    }
+
+    setIsSubmittingEdit(true);
+    try {
+      const payload: Record<string, any> = {
+        nom: editNom.trim(),
+        prenom: editPrenom.trim(),
+        matricule: editMatricule.trim(),
+        sexe: editSexe,
+        classe_id: editClasseId || null,
+        date_naissance: editDateNaissance || null,
+        lieu_naissance: editLieuNaissance.trim() || null,
+        nom_parent: editNomParent.trim() || null,
+        telephone_parent: editTelephoneParent.trim() || null,
+        email_parent: editEmailParent.trim() || null,
+        statut: editStatut,
+      };
+
+      await updateStudent(student.id, payload);
+
+      setStudent({
+        ...student,
+        nom: payload.nom,
+        prenom: payload.prenom,
+        matricule: payload.matricule,
+        sexe: payload.sexe,
+        classeId: payload.classe_id,
+        dateNaissance: payload.date_naissance,
+        lieuNaissance: payload.lieu_naissance,
+        nomParent: payload.nom_parent,
+        telephoneParent: payload.telephone_parent,
+        emailParent: payload.email_parent || 'N/A',
+        statut: payload.statut,
+      });
+
+      setShowEditInfoModal(false);
+      triggerToast("Informations de l'élève modifiées avec succès !");
+    } catch (err: any) {
+      alert("Erreur lors de la modification : " + (err?.message || err));
+    } finally {
+      setIsSubmittingEdit(false);
+    }
+  };
+
   const handleSaveGrade = async (gradeId: string, isMaternelle: boolean) => {
     if (!student) return;
 
@@ -256,22 +338,27 @@ export default function FicheElevePage({ params }: PageProps) {
 
   // Financial calculations
   const classObj = classesList.find(c => c.nom === student.classeId || c.id === student.classeId);
-  // Un frais de classe à 0 correspond en pratique à une classe dont les
-  // frais n'ont jamais été saisis (colonne `prix` par défaut à 0 en base) :
-  // on le traite comme "non configuré", sinon le bouton "Enregistrer un
-  // paiement" restait invisible sans aucune indication pour les nouveaux
-  // établissements n'ayant pas encore paramétré leurs frais de scolarité.
-  // prix inclut désormais les frais d'inscription (classes.frais_inscription) :
-  // rawTotalDue ne doit couvrir que la scolarité, comme totalPaid ci-dessous
-  // qui ne compte que les paiements type_frais = 'Scolarité' (même correctif
-  // que la migration 20260906200000).
-  const rawTotalDue = classObj && typeof classObj.prix === 'number'
-    ? classObj.prix - (Number((classObj as any).frais_inscription) || 0)
-    : null;
+  const fraisInscription = classObj ? (Number((classObj as any).frais_inscription) || 0) : 0;
+
+  // Les frais totaux annuels incluent les frais d'inscription
+  let rawTotalDue: number | null = null;
+  if (classObj && typeof classObj.prix === 'number') {
+    const tranchesTotal = tranches.reduce((sum, t) => sum + (Number(t.montant) || 0), 0);
+    // Si classObj.prix correspond uniquement à la somme des tranches de scolarité, on y ajoute l'inscription
+    if (tranchesTotal > 0 && Math.abs(classObj.prix - tranchesTotal) < 10) {
+      rawTotalDue = classObj.prix + fraisInscription;
+    } else {
+      // Sinon prix englobe déjà le tarif global annuel (incluant l'inscription)
+      rawTotalDue = classObj.prix;
+    }
+  }
+
   const feeConfigured = rawTotalDue !== null && rawTotalDue > 0;
   const totalDue = feeConfigured ? rawTotalDue : null;
-  const totalPaid = ((student.paiements || []) || [])
-    .filter(p => p.statut === 'paid' && p.typeFrais === 'Scolarité')
+
+  // Le montant payé inclut à la fois la Scolarité ET les frais d'Inscription
+  const totalPaid = (student.paiements || [])
+    .filter(p => p.statut === 'paid' && (p.typeFrais === 'Scolarité' || p.typeFrais === 'Inscription'))
     .reduce((sum, p) => sum + p.montant, 0);
   const pendingAmount = totalDue !== null ? Math.max(0, totalDue - totalPaid) : null;
   const paymentProgressPct = totalDue !== null && totalDue > 0 ? (totalPaid / totalDue) * 100 : 0;
@@ -763,12 +850,21 @@ export default function FicheElevePage({ params }: PageProps) {
       <div className="min-h-96">
         {/* Tab 1: Informations Panel */}
         {activeTab === 'info' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in duration-200">
-            {/* Identity Info Card */}
-            <div className="bg-surface rounded-card border border-border p-6 shadow-sm space-y-4">
-              <h3 className="text-[12px] font-bold text-ink-faint uppercase tracking-[1px] border-b border-border pb-2">
-                Fiche d&apos;Identité de l&apos;élève
-              </h3>
+          <div className="space-y-4 animate-in fade-in duration-200">
+            <div className="flex justify-end">
+              <button
+                onClick={handleOpenEditInfo}
+                className="flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent-hover text-cream text-xs font-bold rounded-control shadow-cta transition-colors cursor-pointer"
+              >
+                ✏️ Modifier les informations
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Identity Info Card */}
+              <div className="bg-surface rounded-card border border-border p-6 shadow-sm space-y-4">
+                <h3 className="text-[12px] font-bold text-ink-faint uppercase tracking-[1px] border-b border-border pb-2">
+                  Fiche d&apos;Identité de l&apos;élève
+                </h3>
               
               <div className="grid grid-cols-2 gap-4 text-sm leading-relaxed">
                 <div>
@@ -830,7 +926,8 @@ export default function FicheElevePage({ params }: PageProps) {
               </div>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
         {/* Tab 2: Finance Panel */}
         {activeTab === 'finance' && (
@@ -842,7 +939,12 @@ export default function FicheElevePage({ params }: PageProps) {
                 <span className="text-xl font-extrabold text-ink block mt-1">
                   {totalDue !== null ? formatFCFA(totalDue) : <span className="text-ink-faint italic text-sm">Non configuré</span>}
                 </span>
-                <span className="text-[10px] text-ink-faint mt-1 block">Classe : {displayClasse}</span>
+                <span className="text-[10px] text-ink-faint mt-1 block">
+                  Classe : {displayClasse}
+                  {fraisInscription > 0 && totalDue !== null && (
+                    <span className="font-semibold text-ink-soft"> (dont Inscription : {formatFCFA(fraisInscription)})</span>
+                  )}
+                </span>
               </div>
               <div>
                 <span className="text-[10px] font-bold text-ink-faint uppercase tracking-wider block">Montant Payé</span>
@@ -1571,6 +1673,205 @@ export default function FicheElevePage({ params }: PageProps) {
                   className="flex-1 px-4 py-2 bg-accent hover:bg-accent-hover text-cream rounded-control text-xs font-bold shadow-cta transition-colors"
                 >
                   Enregistrer
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de modification des informations générales de l'élève */}
+      {showEditInfoModal && (
+        <div className="fixed inset-0 bg-ink/60 flex items-center justify-center p-4 z-50 animate-fade-in overflow-y-auto">
+          <div className="bg-surface rounded-card w-full max-w-xl border border-border shadow-login overflow-hidden my-8">
+            <div className="bg-bg p-6 border-b border-border flex justify-between items-center">
+              <div>
+                <h3 className="text-xl font-extrabold text-ink">Modifier la fiche élève</h3>
+                <p className="text-xs text-ink-soft mt-1">Mettez à jour les informations générales et les coordonnées du responsable</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEditInfoModal(false)}
+                className="w-8 h-8 flex items-center justify-center bg-surface border border-border rounded-full text-ink-faint hover:text-ink hover:bg-chip transition-colors cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditInfo} className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
+              {/* Section 1 : Identité élève */}
+              <div>
+                <h4 className="text-xs font-bold text-ink-faint uppercase tracking-wider mb-3 pb-1 border-b border-border">
+                  Identité de l'élève
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[12px] font-bold text-ink-faint uppercase tracking-[1px] mb-1.5">
+                      Nom de famille *
+                    </label>
+                    <input
+                      type="text"
+                      value={editNom}
+                      onChange={(e) => setEditNom(e.target.value)}
+                      required
+                      placeholder="Ex: KAMGA"
+                      className="w-full px-3 py-2 border border-border rounded-control text-sm font-semibold outline-none focus:border-accent focus:bg-surface"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-bold text-ink-faint uppercase tracking-[1px] mb-1.5">
+                      Prénom(s) *
+                    </label>
+                    <input
+                      type="text"
+                      value={editPrenom}
+                      onChange={(e) => setEditPrenom(e.target.value)}
+                      required
+                      placeholder="Ex: Jean Paul"
+                      className="w-full px-3 py-2 border border-border rounded-control text-sm font-semibold outline-none focus:border-accent focus:bg-surface"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-bold text-ink-faint uppercase tracking-[1px] mb-1.5">
+                      Matricule *
+                    </label>
+                    <input
+                      type="text"
+                      value={editMatricule}
+                      onChange={(e) => setEditMatricule(e.target.value)}
+                      required
+                      placeholder="Ex: 2026-6A-001"
+                      className="w-full px-3 py-2 border border-border rounded-control text-sm font-mono font-semibold outline-none focus:border-accent focus:bg-surface"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-bold text-ink-faint uppercase tracking-[1px] mb-1.5">
+                      Genre *
+                    </label>
+                    <select
+                      value={editSexe}
+                      onChange={(e) => setEditSexe(e.target.value as 'M' | 'F')}
+                      className="w-full px-3 py-2 border border-border rounded-control text-sm bg-bg font-semibold outline-none focus:border-accent focus:bg-surface"
+                    >
+                      <option value="M">Masculin (Garçon)</option>
+                      <option value="F">Féminin (Fille)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-bold text-ink-faint uppercase tracking-[1px] mb-1.5">
+                      Classe *
+                    </label>
+                    <select
+                      value={editClasseId}
+                      onChange={(e) => setEditClasseId(e.target.value)}
+                      className="w-full px-3 py-2 border border-border rounded-control text-sm bg-bg font-semibold outline-none focus:border-accent focus:bg-surface"
+                    >
+                      <option value="">Sélectionner une classe</option>
+                      {classesList.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.nom} {(c as any).section ? `(${(c as any).section})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-bold text-ink-faint uppercase tracking-[1px] mb-1.5">
+                      Statut de l'élève
+                    </label>
+                    <select
+                      value={editStatut}
+                      onChange={(e) => setEditStatut(e.target.value as 'actif' | 'suspendu')}
+                      className="w-full px-3 py-2 border border-border rounded-control text-sm bg-bg font-semibold outline-none focus:border-accent focus:bg-surface"
+                    >
+                      <option value="actif">Inscrit / Actif</option>
+                      <option value="suspendu">Suspendu</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-bold text-ink-faint uppercase tracking-[1px] mb-1.5">
+                      Date de naissance
+                    </label>
+                    <input
+                      type="date"
+                      value={editDateNaissance}
+                      onChange={(e) => setEditDateNaissance(e.target.value)}
+                      className="w-full px-3 py-2 border border-border rounded-control text-sm outline-none focus:border-accent focus:bg-surface"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-bold text-ink-faint uppercase tracking-[1px] mb-1.5">
+                      Lieu de naissance
+                    </label>
+                    <input
+                      type="text"
+                      value={editLieuNaissance}
+                      onChange={(e) => setEditLieuNaissance(e.target.value)}
+                      placeholder="Ex: Douala, Yaoundé..."
+                      className="w-full px-3 py-2 border border-border rounded-control text-sm outline-none focus:border-accent focus:bg-surface"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 2 : Responsable légal */}
+              <div>
+                <h4 className="text-xs font-bold text-ink-faint uppercase tracking-wider mb-3 pb-1 border-b border-border">
+                  Responsable Légal (Parent / Tuteur)
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="sm:col-span-2">
+                    <label className="block text-[12px] font-bold text-ink-faint uppercase tracking-[1px] mb-1.5">
+                      Nom complet du parent / tuteur
+                    </label>
+                    <input
+                      type="text"
+                      value={editNomParent}
+                      onChange={(e) => setEditNomParent(e.target.value)}
+                      placeholder="Ex: M. KAMGA Pierre"
+                      className="w-full px-3 py-2 border border-border rounded-control text-sm font-semibold outline-none focus:border-accent focus:bg-surface"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-bold text-ink-faint uppercase tracking-[1px] mb-1.5">
+                      Numéro de téléphone
+                    </label>
+                    <input
+                      type="tel"
+                      value={editTelephoneParent}
+                      onChange={(e) => setEditTelephoneParent(e.target.value)}
+                      placeholder="Ex: +237 699 00 11 22"
+                      className="w-full px-3 py-2 border border-border rounded-control text-sm font-semibold outline-none focus:border-accent focus:bg-surface"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-bold text-ink-faint uppercase tracking-[1px] mb-1.5">
+                      Adresse Email
+                    </label>
+                    <input
+                      type="email"
+                      value={editEmailParent}
+                      onChange={(e) => setEditEmailParent(e.target.value)}
+                      placeholder="Ex: parent@gmail.com"
+                      className="w-full px-3 py-2 border border-border rounded-control text-sm outline-none focus:border-accent focus:bg-surface"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-4 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => setShowEditInfoModal(false)}
+                  className="flex-1 px-4 py-2.5 border border-border hover:bg-bg rounded-control text-xs font-bold text-ink-soft transition-colors cursor-pointer"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingEdit}
+                  className="flex-1 px-4 py-2.5 bg-accent hover:bg-accent-hover text-cream rounded-control text-xs font-bold shadow-cta transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  {isSubmittingEdit ? 'Enregistrement...' : 'Enregistrer les modifications'}
                 </button>
               </div>
             </form>

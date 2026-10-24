@@ -183,3 +183,19 @@ export async function softDeletePayment(payId: string) {
   const { error } = await supabase.rpc('soft_delete_paiement', { p_id: payId });
   if (error) throw error;
 }
+
+/**
+ * Mise à jour des informations générales d'un élève.
+ */
+export async function updateStudent(id: string, studentData: Record<string, any>) {
+  validateOrThrow(eleveSchema.partial(), studentData, 'Élève invalide');
+
+  const { data, error } = await supabase
+    .from('eleves')
+    .update(studentData)
+    .eq('id', id)
+    .select();
+
+  if (error) throw error;
+  return data;
+}

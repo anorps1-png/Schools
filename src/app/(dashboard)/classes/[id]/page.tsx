@@ -5,14 +5,16 @@ import { Classe, Eleve } from '@/types/domain';
 import Link from 'next/link';
 import { useEtablissement } from '@/contexts/etablissement-context';
 import { captureError, captureMessage } from '@/lib/observability/logger';
+import { printStudentList } from '@/lib/print/printStudentList';
 
 export default function ClasseDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
   const classeId = decodeURIComponent(resolvedParams.id);
-  const { etablissementId } = useEtablissement();
+  const { etablissementId, academicYear } = useEtablissement();
   
   const [classe, setClasse] = useState<any | null>(null);
   const [students, setStudents] = useState<Eleve[]>([]);
+  const [etabInfo, setEtabInfo] = useState<any | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
   const supabase = useMemo(() => createClient(), []);
@@ -21,16 +23,35 @@ export default function ClasseDetailPage({ params }: { params: Promise<{ id: str
     if (!etablissementId) return;
     const fetchData = async () => {
       try {
-        const { data, error } = await supabase
-          .from('classes')
-          .select('*, eleves(*)')
-          .eq('id', classeId)
-          .eq('etablissement_id', etablissementId)
-          .single();
+        const [{ data: classData, error: classError }, { data: etabData }] = await Promise.all([
+          supabase
+            .from('classes')
+            .select('*, eleves(*)')
+            .eq('id', classeId)
+            .eq('etablissement_id', etablissementId)
+            .single(),
+          supabase
+            .from('etablissements')
+            .select('nom, adresse, telephone, email, logo_url')
+            .eq('id', etablissementId)
+            .single()
+        ]);
 
-        if (data) {
-          setClasse(data);
-          setStudents(data.eleves || []);
+        if (etabData) setEtabInfo(etabData);
+
+        if (classData) {
+          setClasse(classData);
+          // Tri alphabétique strict (Nom puis Prénom)
+          const sortedStudents = (classData.eleves || []).sort((a: any, b: any) => {
+            const nomA = (a.nom || '').trim();
+            const nomB = (b.nom || '').trim();
+            const cmpNom = nomA.localeCompare(nomB, 'fr', { sensitivity: 'base' });
+            if (cmpNom !== 0) return cmpNom;
+            const prenomA = (a.prenom || '').trim();
+            const prenomB = (b.prenom || '').trim();
+            return prenomA.localeCompare(prenomB, 'fr', { sensitivity: 'base' });
+          });
+          setStudents(sortedStudents);
         }
       } catch (err) {
         captureError(err, { context: "Error fetching class details:" });
@@ -67,6 +88,35 @@ export default function ClasseDetailPage({ params }: { params: Promise<{ id: str
 
   const classAvg = countAvg > 0 ? (sumAvg / countAvg).toFixed(2) : '--';
   const successRate = countAvg > 0 ? ((passed / countAvg) * 100).toFixed(1) : '--';
+
+  const handlePrintClassList = () => {
+    printStudentList({
+      title: `LISTE OFFICIELLE DES ÉLÈVES`,
+      classeNom: classe.nom,
+      subtitle: `Section : ${classe.section || 'Francophone'} • Niveau : ${classe.niveau || '—'}`,
+      schoolName: etabInfo?.nom,
+      schoolAddress: etabInfo?.adresse,
+      schoolPhone: etabInfo?.telephone,
+      schoolEmail: etabInfo?.email,
+      schoolLogo: etabInfo?.logo_url,
+      academicYear: academicYear || undefined,
+      students: students.map((s: any) => ({
+        id: s.id,
+        matricule: s.matricule,
+        nom: s.nom,
+        prenom: s.prenom,
+        sexe: s.sexe,
+        dateNaissance: s.date_naissance || s.dateNaissance,
+        lieuNaissance: s.lieu_naissance || s.lieuNaissance,
+        nomParent: s.nom_parent || s.nomParent,
+        telephoneParent: s.telephone_parent || s.telephoneParent,
+        classeNom: classe.nom,
+      })),
+      additionalInfo: [
+        { label: 'Enseignant Principal', value: classe.enseignant_principal_id || 'Non assigné' },
+      ],
+    });
+  };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
@@ -119,9 +169,18 @@ export default function ClasseDetailPage({ params }: { params: Promise<{ id: str
 
       {/* Liste des Élèves */}
       <div className="bg-surface p-6 rounded-card shadow-sm border border-border">
-        <div className="flex items-center justify-between border-b pb-2 mb-4">
-          <h2 className="text-lg font-bold">Liste des Élèves</h2>
-          <span className="text-xs font-bold bg-chip text-ink px-2 py-1 rounded">{students.length} Inscrits</span>
+        <div className="flex items-center justify-between border-b pb-2 mb-4 flex-wrap gap-2">
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-bold">Liste des Élèves</h2>
+            <span className="text-xs font-bold bg-chip text-ink px-2 py-1 rounded">{students.length} Inscrits</span>
+          </div>
+          <button
+            onClick={handlePrintClassList}
+            className="flex items-center gap-2 px-3.5 py-1.5 bg-transparent border border-outline hover:border-ink text-ink-soft hover:text-ink text-xs font-bold rounded-control transition-colors cursor-pointer"
+            title="Imprimer la liste officielle de la classe"
+          >
+            🖨️ Imprimer la liste
+          </button>
         </div>
         
         <div className="overflow-x-auto">
@@ -141,7 +200,7 @@ export default function ClasseDetailPage({ params }: { params: Promise<{ id: str
                   <td className="px-4 py-3 text-ink-soft font-mono text-xs">{student.matricule}</td>
                   <td className="px-4 py-3 font-semibold text-ink">{student.nom} {student.prenom}</td>
                   <td className="px-4 py-3">{student.sexe === 'M' ? 'Garçon' : 'Fille'}</td>
-                  <td className="px-4 py-3 text-ink-soft">{student.dateNaissance}</td>
+                  <td className="px-4 py-3 text-ink-soft">{(student as any).date_naissance || student.dateNaissance || '—'}</td>
                   <td className="px-4 py-3 text-right">
                     <Link href={`/eleves/${encodeURIComponent(student.id)}`} className="inline-block px-3 py-1.5 bg-chip hover:bg-chip text-ink-soft font-semibold rounded-control text-xs transition-colors">
                       Voir profil

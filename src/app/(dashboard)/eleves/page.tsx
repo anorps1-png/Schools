@@ -11,10 +11,11 @@ import { getStudents, createStudent, addPayment, getStudentsWidgetStats, getStud
 import { getClasses } from '@/lib/queries/classes';
 import { useEtablissement } from '@/contexts/etablissement-context';
 import { createClient, isRunningInElectron } from '@/lib/supabase/client';
+import { printStudentList, type PrintableStudent } from '@/lib/print/printStudentList';
 
 export default function ElevesPage() {
   const isElectron = isRunningInElectron();
-  const { etablissementId, academicYearId, setAcademicYearId } = useEtablissement();
+  const { etablissementId, academicYearId, setAcademicYearId, academicYear } = useEtablissement();
   const [students, setStudents] = useState<Eleve[]>([]);
   const [classesList, setClassesList] = useState<Classe[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -349,28 +350,38 @@ export default function ElevesPage() {
     return { totalDue, totalPaid, status };
   }, [classesList]);
 
-  // Filter students
+  // Filter and alphabetically sort students
   const filteredStudents = useMemo(() => {
     if (!isLoaded) return [];
-    return studentsOfActiveYear.filter(student => {
-      if (!student) return false;
-      // 1. Search term (Name or Matricule)
-      const fullName = `${student.nom || ''} ${student.prenom || ''}`.toLowerCase();
-      const matriculeVal = (student.matricule || '').toLowerCase();
-      const matchesSearch = fullName.includes(searchTerm.toLowerCase()) || matriculeVal.includes(searchTerm.toLowerCase());
+    return studentsOfActiveYear
+      .filter(student => {
+        if (!student) return false;
+        // 1. Search term (Name or Matricule)
+        const fullName = `${student.nom || ''} ${student.prenom || ''}`.toLowerCase();
+        const matriculeVal = (student.matricule || '').toLowerCase();
+        const matchesSearch = fullName.includes(searchTerm.toLowerCase()) || matriculeVal.includes(searchTerm.toLowerCase());
 
-      // 2. Class
-      const matchesClass = selectedClass === 'All' || student.classeId === selectedClass;
+        // 2. Class
+        const matchesClass = selectedClass === 'All' || student.classeId === selectedClass;
 
-      // 3. Payment Status
-      const stats = getStudentPaymentStats(student);
-      const matchesPayment = selectedPaymentStatus === 'All' || stats.status === selectedPaymentStatus;
+        // 3. Payment Status
+        const stats = getStudentPaymentStats(student);
+        const matchesPayment = selectedPaymentStatus === 'All' || stats.status === selectedPaymentStatus;
 
-      // 4. Gender
-      const matchesGender = selectedGender === 'All' || student.sexe === selectedGender;
+        // 4. Gender
+        const matchesGender = selectedGender === 'All' || student.sexe === selectedGender;
 
-      return matchesSearch && matchesClass && matchesPayment && matchesGender;
-    });
+        return matchesSearch && matchesClass && matchesPayment && matchesGender;
+      })
+      .sort((a, b) => {
+        const nomA = (a.nom || '').trim();
+        const nomB = (b.nom || '').trim();
+        const cmpNom = nomA.localeCompare(nomB, 'fr', { sensitivity: 'base' });
+        if (cmpNom !== 0) return cmpNom;
+        const prenomA = (a.prenom || '').trim();
+        const prenomB = (b.prenom || '').trim();
+        return prenomA.localeCompare(prenomB, 'fr', { sensitivity: 'base' });
+      });
   }, [studentsOfActiveYear, searchTerm, selectedClass, selectedPaymentStatus, selectedGender, isLoaded, getStudentPaymentStats]);
 
   // Total counts for widgets
@@ -843,6 +854,95 @@ export default function ElevesPage() {
     });
     downloadExcel(dataToExport, 'Liste_Eleves');
     triggerToast('Export Excel généré avec succès !');
+  };
+
+  const handlePrintStudentList = async () => {
+    let listToPrint: PrintableStudent[] = [];
+
+    let etabInfo: any = null;
+    try {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from('etablissements')
+        .select('nom, adresse, telephone, email, logo_url')
+        .eq('id', etablissementId)
+        .single();
+      if (data) etabInfo = data;
+    } catch {
+      // ignore
+    }
+
+    const currentClassName = selectedClass !== 'All'
+      ? classesList.find(c => c.id === selectedClass)?.nom || selectedClass
+      : undefined;
+
+    if (useServerTable && etablissementId) {
+      try {
+        const EXPORT_PAGE_SIZE = 1000;
+        let page = 1;
+        let all: StudentPage[] = [];
+        let totalCount = Infinity;
+        while (all.length < totalCount) {
+          const { students: rows, totalCount: tc } = await getStudentsPaginated({
+            etablissementId,
+            anneeScolaireId: academicYearId || null,
+            search: searchTerm,
+            classeId: selectedClass === 'All' ? null : selectedClass,
+            statutPaiement: selectedPaymentStatus === 'All' ? null : (selectedPaymentStatus as 'paid' | 'partial' | 'unpaid'),
+            sexe: selectedGender === 'All' ? null : (selectedGender as 'M' | 'F'),
+            page,
+            pageSize: EXPORT_PAGE_SIZE,
+          });
+          all = all.concat(rows);
+          totalCount = tc;
+          if (rows.length < EXPORT_PAGE_SIZE) break;
+          page++;
+        }
+
+        listToPrint = all.map(s => ({
+          id: s.id,
+          matricule: s.matricule,
+          nom: s.nom,
+          prenom: s.prenom,
+          sexe: s.sexe,
+          classeNom: s.classe_nom || classesList.find(c => c.id === s.classe_id)?.nom || s.classe_id,
+          nomParent: s.nom_parent,
+          telephoneParent: s.telephone_parent,
+          dateNaissance: s.date_naissance,
+          lieuNaissance: s.lieu_naissance,
+        }));
+      } catch (err) {
+        captureError(err, { context: "Print list server-backed fetch failed" });
+        alert("Erreur lors de la préparation de la liste.");
+        return;
+      }
+    } else {
+      listToPrint = filteredStudents.map(s => ({
+        id: s.id,
+        matricule: s.matricule,
+        nom: s.nom,
+        prenom: s.prenom,
+        sexe: s.sexe,
+        classeNom: classesList.find(c => c.id === s.classeId)?.nom || s.classeId,
+        nomParent: s.nomParent,
+        telephoneParent: s.telephoneParent,
+        dateNaissance: s.dateNaissance,
+        lieuNaissance: s.lieuNaissance,
+      }));
+    }
+
+    printStudentList({
+      title: currentClassName ? `LISTE OFFICIELLE DES ÉLÈVES — CLASSE : ${currentClassName}` : 'LISTE GÉNÉRALE DES ÉLÈVES',
+      subtitle: currentClassName ? undefined : (selectedPaymentStatus !== 'All' ? `Filtre Statut : ${selectedPaymentStatus}` : undefined),
+      classeNom: currentClassName,
+      schoolName: etabInfo?.nom,
+      schoolAddress: etabInfo?.adresse,
+      schoolPhone: etabInfo?.telephone,
+      schoolEmail: etabInfo?.email,
+      schoolLogo: etabInfo?.logo_url,
+      academicYear: academicYear || undefined,
+      students: listToPrint,
+    });
   };
 
   // Comparaison de nom de classe insensible aux accents et aux espaces
@@ -1777,6 +1877,13 @@ export default function ElevesPage() {
           >
             <DownloadIcon size={14} />
             Exporter
+          </button>
+          <button
+            onClick={handlePrintStudentList}
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-transparent border border-outline text-ink-soft hover:border-ink hover:text-ink text-[13px] font-bold rounded-control transition-colors cursor-pointer"
+            title="Imprimer la liste officielle des élèves"
+          >
+            🖨️ Imprimer la liste
           </button>
           <Link
             href="/finance/rapport-tranches"
