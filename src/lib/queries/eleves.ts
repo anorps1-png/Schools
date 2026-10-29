@@ -12,7 +12,7 @@ export async function getStudents(etablissementId: string) {
   while (hasMore) {
     const { data, error } = await supabase
       .from('eleves')
-      .select('id, matricule, nom, prenom, sexe, classe_id, annee_scolaire_id, nom_parent, telephone_parent, email_parent, date_naissance, lieu_naissance, date_inscription, statut, paiements(id, eleve_id, montant, date, type_frais, statut, reference, mode_paiement, tranche_id)')
+      .select('id, matricule, nom, prenom, sexe, classe_id, annee_scolaire_id, nom_parent, telephone_parent, email_parent, date_naissance, lieu_naissance, date_inscription, statut, est_subventionne, paiements(id, eleve_id, montant, date, type_frais, statut, reference, mode_paiement, tranche_id)')
       .eq('etablissement_id', etablissementId)
       .order('nom', { ascending: true })
       .order('id', { ascending: true })
@@ -48,6 +48,7 @@ export interface StudentPage {
   lieu_naissance: string | null;
   date_inscription: string | null;
   statut: string;
+  est_subventionne?: boolean;
   total_due: number;
   total_paid: number;
   statut_paiement: 'paid' | 'partial' | 'unpaid' | 'late';
@@ -63,6 +64,7 @@ export interface StudentsWidgetStats {
   // qui inclut les retards.
   lateCount?: number;
   unpaidCount: number;
+  subventionnesCount?: number;
 }
 
 /**
@@ -80,10 +82,11 @@ export async function getStudentsPaginated(params: {
   classeId?: string | null;
   statutPaiement?: 'paid' | 'partial' | 'unpaid' | 'late' | null;
   sexe?: 'M' | 'F' | null;
+  estSubventionne?: boolean | null;
   page: number;
   pageSize: number;
 }): Promise<{ students: StudentPage[]; totalCount: number }> {
-  const { data, error } = await supabase.rpc('get_students_paginated', {
+  const rpcParams: Record<string, any> = {
     p_etablissement_id: params.etablissementId,
     p_annee_scolaire_id: params.anneeScolaireId ?? null,
     p_search: params.search || null,
@@ -92,7 +95,12 @@ export async function getStudentsPaginated(params: {
     p_sexe: params.sexe ?? null,
     p_page: params.page,
     p_page_size: params.pageSize,
-  });
+  };
+  if (params.estSubventionne !== undefined && params.estSubventionne !== null) {
+    rpcParams.p_est_subventionne = params.estSubventionne;
+  }
+
+  const { data, error } = await supabase.rpc('get_students_paginated', rpcParams);
 
   if (error) throw error;
   const rows = (data || []) as (StudentPage & { total_count: number })[];
@@ -100,7 +108,7 @@ export async function getStudentsPaginated(params: {
   return { students: rows, totalCount };
 }
 
-/** Agrégats des cartes de résumé (payé/partiel/non payé/total), sans transférer les lignes. */
+/** Agrégats des cartes de résumé (payé/partiel/non payé/total/subventionnés), sans transférer les lignes. */
 export async function getStudentsWidgetStats(
   etablissementId: string,
   anneeScolaireId?: string | null
@@ -117,9 +125,20 @@ export async function getStudentsWidgetStats(
 export async function getStudentById(id: string) {
   const { data, error } = await supabase
     .from('eleves')
-    .select('id, matricule, nom, prenom, sexe, classe_id, annee_scolaire_id, nom_parent, telephone_parent, email_parent, date_naissance, lieu_naissance, date_inscription, statut, paiements(id, eleve_id, montant, date, type_frais, statut, reference, mode_paiement, tranche_id), notes(id, note, trimestre, matiere, matiere_id, evaluation_maternelle, enseignant_id, coefficient)')
+    .select('id, matricule, nom, prenom, sexe, classe_id, annee_scolaire_id, nom_parent, telephone_parent, email_parent, date_naissance, lieu_naissance, date_inscription, statut, est_subventionne, paiements(id, eleve_id, montant, date, type_frais, statut, reference, mode_paiement, tranche_id), notes(id, note, trimestre, matiere, matiere_id, evaluation_maternelle, enseignant_id, coefficient)')
     .eq('id', id)
     .single();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function toggleStudentSubvention(studentId: string, estSubventionne: boolean) {
+  const { data, error } = await supabase
+    .from('eleves')
+    .update({ est_subventionne: estSubventionne })
+    .eq('id', studentId)
+    .select();
 
   if (error) throw error;
   return data;

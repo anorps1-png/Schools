@@ -34,6 +34,8 @@ export interface Classe {
   enseignantAssistantId?: string;
   sectionId?: string; // ex: 'sec-fr' ou 'sec-en'
   prix?: number; // Prix de la scolarité pour cette classe
+  frais_inscription?: number;
+  fraisInscription?: number;
   // Agrégations pré-calculées
   effectifTotal?: number;
   effectifFilles?: number;
@@ -87,6 +89,8 @@ export interface Eleve {
   dateInscription: string;
   statut: 'actif' | 'suspendu' | 'transfere';
   photoUrl?: string;
+  estSubventionne?: boolean;
+  est_subventionne?: boolean;
 
   // Attributs pour jointure locale/API
   statutPaiement?: 'paid' | 'partial' | 'unpaid';

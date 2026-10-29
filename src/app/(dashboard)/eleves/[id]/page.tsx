@@ -10,7 +10,7 @@ import {
 } from '@/components/icons';
 import { Eleve, Paiement, NoteMatiere, TransactionPaiement, Classe, DisciplineIncident } from '@/types/domain';
 import { createClient } from '@/lib/supabase/client';
-import { addPayment, updatePayment, softDeletePayment } from '@/lib/queries/eleves';
+import { addPayment, updatePayment, softDeletePayment, toggleStudentSubvention } from '@/lib/queries/eleves';
 import { paiementSchema, validateOrThrow } from '@/lib/validation/schemas';
 import { useEtablissement } from '@/contexts/etablissement-context';
 
@@ -117,6 +117,8 @@ export default function FicheElevePage({ params }: PageProps) {
           lieuNaissance: studentData.lieu_naissance || 'Yaoundé',
           dateInscription: studentData.date_inscription,
           statut: studentData.statut,
+          estSubventionne: Boolean(studentData.est_subventionne),
+          est_subventionne: Boolean(studentData.est_subventionne),
           paiements: studentData.paiements?.map((p: any) => ({
             id: p.id,
             eleveId: p.eleve_id,
@@ -256,20 +258,32 @@ export default function FicheElevePage({ params }: PageProps) {
 
   // Financial calculations
   const classObj = classesList.find(c => c.nom === student.classeId || c.id === student.classeId);
-  // Un frais de classe à 0 correspond en pratique à une classe dont les
-  // frais n'ont jamais été saisis (colonne `prix` par défaut à 0 en base) :
-  // on le traite comme "non configuré", sinon le bouton "Enregistrer un
-  // paiement" restait invisible sans aucune indication pour les nouveaux
-  // établissements n'ayant pas encore paramétré leurs frais de scolarité.
-  // prix inclut désormais les frais d'inscription (classes.frais_inscription) :
-  // rawTotalDue ne doit couvrir que la scolarité, comme totalPaid ci-dessous
-  // qui ne compte que les paiements type_frais = 'Scolarité' (même correctif
-  // que la migration 20260906200000).
-  const rawTotalDue = classObj && typeof classObj.prix === 'number'
+  const isSub = Boolean((student as any).estSubventionne ?? (student as any).est_subventionne);
+  // Règle métier : l'élève subventionné paie un forfait annuel de 55 000 FCFA.
+  // L'élève standard paie (prix - frais_inscription).
+  const rawClassDue = classObj && typeof classObj.prix === 'number'
     ? classObj.prix - (Number((classObj as any).frais_inscription) || 0)
     : null;
+  const rawTotalDue = isSub ? 55000 : rawClassDue;
   const feeConfigured = rawTotalDue !== null && rawTotalDue > 0;
   const totalDue = feeConfigured ? rawTotalDue : null;
+
+  const handleToggleSubvention = async () => {
+    if (!student) return;
+    try {
+      const current = Boolean((student as any).estSubventionne ?? (student as any).est_subventionne);
+      const next = !current;
+      await toggleStudentSubvention(student.id, next);
+      setStudent({
+        ...student,
+        estSubventionne: next,
+        est_subventionne: next
+      } as any);
+      triggerToast(`Régime mis à jour : ${next ? 'Élève Subventionné (55 000 FCFA)' : 'Standard'}`);
+    } catch (err: any) {
+      alert("Erreur lors de la modification du statut : " + err.message);
+    }
+  };
   const totalPaid = ((student.paiements || []) || [])
     .filter(p => p.statut === 'paid' && p.typeFrais === 'Scolarité')
     .reduce((sum, p) => sum + p.montant, 0);
@@ -700,19 +714,33 @@ export default function FicheElevePage({ params }: PageProps) {
           </div>
         </div>
 
-        {/* Status Badge */}
-        <span className={`inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-bold border ${
-          student.statut === 'actif'
-            ? 'bg-green-bg text-green border-transparent'
-            : student.statut === 'suspendu'
-            ? 'bg-red-bg text-accent border-transparent'
-            : 'bg-chip text-ink-soft border-border'
-        }`}>
-          <span className={`w-1.5 h-1.5 rounded-full ${
-            student.statut === 'actif' ? 'bg-green' : 'bg-accent'
-          }`}></span>
-          {student.statut === 'actif' ? 'Inscrit / Actif' : 'Suspendu'}
-        </span>
+        {/* Status Badge & Subvention Toggle */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={handleToggleSubvention}
+            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border transition-colors ${
+              isSub
+                ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+                : 'bg-chip text-ink-soft border-border hover:bg-surface'
+            }`}
+            title="Cliquer pour basculer le régime subventionné / standard"
+          >
+            <span>{isSub ? '★ Subventionné (55 000 FCFA)' : 'Régime Standard'}</span>
+          </button>
+
+          <span className={`inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-bold border ${
+            student.statut === 'actif'
+              ? 'bg-green-bg text-green border-transparent'
+              : student.statut === 'suspendu'
+              ? 'bg-red-bg text-accent border-transparent'
+              : 'bg-chip text-ink-soft border-border'
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${
+              student.statut === 'actif' ? 'bg-green' : 'bg-accent'
+            }`}></span>
+            {student.statut === 'actif' ? 'Inscrit / Actif' : 'Suspendu'}
+          </span>
+        </div>
       </div>
 
       {/* Tabs list */}
@@ -842,7 +870,9 @@ export default function FicheElevePage({ params }: PageProps) {
                 <span className="text-xl font-extrabold text-ink block mt-1">
                   {totalDue !== null ? formatFCFA(totalDue) : <span className="text-ink-faint italic text-sm">Non configuré</span>}
                 </span>
-                <span className="text-[10px] text-ink-faint mt-1 block">Classe : {displayClasse}</span>
+                <span className="text-[10px] text-ink-faint mt-1 block">
+                  Classe : {displayClasse} {isSub ? '· Plafond subventionné (55 000 FCFA)' : ''}
+                </span>
               </div>
               <div>
                 <span className="text-[10px] font-bold text-ink-faint uppercase tracking-wider block">Montant Payé</span>

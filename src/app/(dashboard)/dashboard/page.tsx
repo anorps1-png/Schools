@@ -36,7 +36,7 @@ export default function Dashboard() {
               return null;
             }),
           ]);
-          setClassesList(classes as Classe[]);
+          setClassesList((classes || []) as unknown as Classe[]);
           setTeachersList(teachers);
           setServerStats(stats);
 
@@ -48,6 +48,8 @@ export default function Dashboard() {
             sexe: d.sexe,
             classeId: d.classe_id,
             statut: d.statut,
+            estSubventionne: Boolean(d.est_subventionne),
+            est_subventionne: Boolean(d.est_subventionne),
             dateInscription: d.date_inscription ? d.date_inscription.split('T')[0] : '',
             paiements: d.paiements?.map((p: any) => ({
               id: p.id,
@@ -195,10 +197,13 @@ export default function Dashboard() {
     : '--';
 
   // Total expected (Frais attendus pour ces élèves)
+  // Total expected (Frais attendus pour ces élèves)
   const totalExpected = useMemo(() => {
     const activeList = dateFilterType === 'all' ? students : filteredStudentsForExpected;
     return activeList.reduce((sum, student) => {
       const classObj = classesList.find(c => c.id === student.classeId);
+      const isSub = Boolean(student.estSubventionne ?? (student as any).est_subventionne);
+      if (isSub) return sum + 55000;
       // prix inclut les frais d'inscription : ne couvre que la scolarité ici,
       // comme totalPaid ci-dessous (paiements type_frais='Scolarité').
       return sum + ((classObj?.prix || 0) - (Number((classObj as any)?.frais_inscription) || 0));
@@ -250,12 +255,31 @@ export default function Dashboard() {
       }, 0);
       const allExpected = students.reduce((sum, student) => {
         const classObj = classesList.find(c => c.id === student.classeId);
+        const isSub = Boolean(student.estSubventionne ?? (student as any).est_subventionne);
+        if (isSub) return sum + 55000;
         return sum + ((classObj?.prix || 0) - (Number((classObj as any)?.frais_inscription) || 0));
       }, 0);
       return Math.max(0, allExpected - allPaid);
     }
     return Math.max(0, totalExpected - totalPaidByFilteredStudents);
   }, [dateFilterType, students, classesList, totalExpected, totalPaidByFilteredStudents]);
+
+  const subventionnesCount = useMemo(() => {
+    return serverStats?.subventionnes_count ?? students.filter(s => Boolean(s.estSubventionne ?? (s as any).est_subventionne)).length;
+  }, [serverStats, students]);
+
+  const totalSubventions = useMemo(() => {
+    if (serverStats?.total_subventions !== undefined && serverStats?.total_subventions !== null) {
+      return Number(serverStats.total_subventions);
+    }
+    return students.reduce((sum, s) => {
+      const isSub = Boolean(s.estSubventionne ?? (s as any).est_subventionne);
+      if (!isSub) return sum;
+      const classObj = classesList.find(c => c.id === s.classeId);
+      const standardDue = Math.max(0, (classObj?.prix || 0) - (Number((classObj as any)?.frais_inscription) || 0));
+      return sum + Math.max(0, standardDue - 55000);
+    }, 0);
+  }, [serverStats, students, classesList]);
 
   // Recovery Rate
   const recoveryRate = useMemo(() => {
@@ -286,7 +310,11 @@ export default function Dashboard() {
       });
 
       const count = studentsInClass.length;
-      const expected = count * (c.prix || 0);
+      const expected = studentsInClass.reduce((acc, s) => {
+        const isSub = Boolean(s.estSubventionne ?? (s as any).est_subventionne);
+        if (isSub) return acc + 55000;
+        return acc + ((c.prix || 0) - (Number((c as any)?.frais_inscription) || 0));
+      }, 0);
 
       // Payments received in the period for all students in this class
       const studentsAllInClass = students.filter(s => s.classeId === c.id);
@@ -454,6 +482,11 @@ export default function Dashboard() {
             {globalSuccessRate !== '--' && (
               <span className="text-[13px] font-bold text-ink-soft bg-chip rounded-pill px-3 py-1">Réussite {globalSuccessRate}%</span>
             )}
+            {subventionnesCount > 0 && (
+              <span className="text-[13px] font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-pill px-3 py-1">
+                {subventionnesCount} subventionné{subventionnesCount > 1 ? 's' : ''}
+              </span>
+            )}
           </div>
           {dateFilterType !== 'all' && (
             <div className="mt-2">
@@ -497,10 +530,15 @@ export default function Dashboard() {
         <div className="bg-ink rounded-card p-6 text-cream animate-fade-up [animation-delay:0.24s]">
           <div className="text-[13px] font-bold opacity-80">Reste à percevoir</div>
           <div className="text-[30px] font-extrabold tracking-[-1.5px] leading-tight mt-3 truncate">{formatFCFA(totalPending)}</div>
-          <div className="mt-4">
+          <div className="mt-4 flex flex-col gap-1.5">
             <span className="text-[13px] font-semibold bg-cream/15 rounded-pill px-3 py-1 inline-block">
               Sur {formatFCFA(totalExpected)} attendus
             </span>
+            {totalSubventions > 0 && (
+              <span className="text-[11px] text-cream/70 font-medium">
+                Dont {formatFCFA(totalSubventions)} subventionnés pris en charge
+              </span>
+            )}
           </div>
         </div>
       </div>

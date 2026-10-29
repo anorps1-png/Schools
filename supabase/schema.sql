@@ -107,6 +107,7 @@ CREATE TABLE public.eleves (
   photo_url TEXT,
   date_inscription DATE DEFAULT CURRENT_DATE,
   statut TEXT DEFAULT 'actif' CHECK (statut IN ('actif', 'suspendu', 'transfere')),
+  est_subventionne BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

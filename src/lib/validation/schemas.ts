@@ -27,6 +27,7 @@ export const eleveSchema = z.object({
   nom_parent: z.string().max(120).optional().nullable(),
   email_parent: z.string().email('Email du parent invalide.').optional().nullable().or(z.literal('')),
   statut: z.enum(['actif', 'suspendu', 'transfere']).optional(),
+  est_subventionne: z.boolean().optional(),
 }).passthrough(); // tolère les champs additionnels (photo_url, etc.)
 
 // ---------------------------------------------------------------------------
