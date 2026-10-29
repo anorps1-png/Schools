@@ -71,13 +71,21 @@ async function getDashboardStats(params: any) {
   const nbClasses = classes.length;
 
   const classesById = new Map((await table('classes')).map((c) => [c.id, c]));
-  // prix inclut désormais les frais d'inscription (classes.frais_inscription) :
-  // total_expected ne doit couvrir que la scolarité, comme total_paid ci-dessous
-  // (même correctif que la migration 20260906200000 côté Postgres).
+  // Règle métier : tout élève subventionné paie 55 000 FCFA.
+  // L'élève standard paie (prix - frais_inscription).
   let totalExpected = 0;
+  let totalSubventions = 0;
+  const subventionnesCount = eleves.filter((e) => e.est_subventionne === true).length;
+
   for (const e of eleves) {
     const c = e.classe_id ? classesById.get(e.classe_id) : null;
-    if (c) totalExpected += num(c.prix) - num(c.frais_inscription);
+    const baseTuition = c ? Math.max(0, num(c.prix) - num(c.frais_inscription)) : 0;
+    if (e.est_subventionne === true) {
+      totalExpected += 55000;
+      totalSubventions += Math.max(0, baseTuition - 55000);
+    } else {
+      totalExpected += baseTuition;
+    }
   }
 
   const elevesIdSet = new Set(eleves.map((e) => e.id));
@@ -110,10 +118,12 @@ async function getDashboardStats(params: any) {
     active_students: activeStudents,
     filles,
     garcons,
+    subventionnes_count: subventionnesCount,
     total_teachers: totalTeachers,
     active_teachers: activeTeachers,
     nb_classes: nbClasses,
     total_expected: totalExpected,
+    total_subventions: totalSubventions,
     total_paid: totalPaid,
     students_with_grades: withGrades,
     students_passed: passed,
@@ -158,6 +168,7 @@ async function getStudentsPaginated(params: any) {
   const classeId = params.p_classe_id || null;
   const statutPaiementFilter = params.p_statut_paiement || null;
   const sexe = params.p_sexe || null;
+  const estSubventionneFilter = params.p_est_subventionne !== undefined && params.p_est_subventionne !== null ? params.p_est_subventionne : null;
   const page = Math.max(params.p_page || 1, 1);
   const pageSize = Math.max(params.p_page_size || 20, 1);
 
@@ -175,6 +186,9 @@ async function getStudentsPaginated(params: any) {
   if (anneeId) eleves = eleves.filter((e) => e.annee_scolaire_id === anneeId);
   if (classeId) eleves = eleves.filter((e) => e.classe_id === classeId);
   if (sexe) eleves = eleves.filter((e) => e.sexe === sexe);
+  if (estSubventionneFilter !== null) {
+    eleves = eleves.filter((e) => Boolean(e.est_subventionne) === Boolean(estSubventionneFilter));
+  }
   if (search) {
     eleves = eleves.filter(
       (e) =>
@@ -185,9 +199,9 @@ async function getStudentsPaginated(params: any) {
 
   const scored = eleves.map((e) => {
     const classe = e.classe_id ? classesById.get(e.classe_id) : null;
-    // total_due ne couvre que la scolarité (prix - frais_inscription), à
-    // comparer aux paiements type_frais = 'Scolarité' filtrés plus haut.
-    const totalDue = num(classe?.prix) - num(classe?.frais_inscription);
+    const isSub = Boolean(e.est_subventionne);
+    // Règle métier : tout élève subventionné paie 55 000 FCFA.
+    const totalDue = isSub ? 55000 : (num(classe?.prix) - num(classe?.frais_inscription));
     const totalPaid = paidByEleve.get(e.id) || 0;
     const pctEchu = pctEchuParAnnee.get(e.annee_scolaire_id) || 0;
     const statut = statutPaiement(totalDue, totalPaid, pctEchu);
@@ -208,6 +222,7 @@ async function getStudentsPaginated(params: any) {
       lieu_naissance: e.lieu_naissance,
       date_inscription: e.date_inscription,
       statut: e.statut,
+      est_subventionne: isSub,
       total_due: totalDue,
       total_paid: totalPaid,
       statut_paiement: statut,
@@ -257,16 +272,16 @@ async function getStudentsWidgetStats(params: any) {
   let eleves = alive(await table('eleves')).filter((e) => e.etablissement_id === etabId);
   if (anneeId) eleves = eleves.filter((e) => e.annee_scolaire_id === anneeId);
 
-  const counts = { total: 0, paidCount: 0, partialCount: 0, lateCount: 0, unpaidCount: 0 };
+  const counts = { total: 0, paidCount: 0, partialCount: 0, lateCount: 0, unpaidCount: 0, subventionnesCount: 0 };
   for (const e of eleves) {
     const classe = e.classe_id ? classesById.get(e.classe_id) : null;
-    // total_due ne couvre que la scolarité (prix - frais_inscription), à
-    // comparer aux paiements type_frais = 'Scolarité' filtrés plus haut.
-    const totalDue = num(classe?.prix) - num(classe?.frais_inscription);
+    const isSub = Boolean(e.est_subventionne);
+    const totalDue = isSub ? 55000 : (num(classe?.prix) - num(classe?.frais_inscription));
     const totalPaid = paidByEleve.get(e.id) || 0;
     const pctEchu = pctEchuParAnnee.get(e.annee_scolaire_id) || 0;
     const statut = statutPaiement(totalDue, totalPaid, pctEchu);
     counts.total++;
+    if (isSub) counts.subventionnesCount++;
     if (statut === 'paid') counts.paidCount++;
     else if (statut === 'partial') counts.partialCount++;
     else if (statut === 'late') counts.lateCount++;

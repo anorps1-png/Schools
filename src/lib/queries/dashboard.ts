@@ -7,10 +7,12 @@ export interface DashboardStats {
   active_students: number;
   filles: number;
   garcons: number;
+  subventionnes_count?: number;
   total_teachers: number;
   active_teachers: number;
   nb_classes: number;
   total_expected: number;
+  total_subventions?: number;
   total_paid: number;
   students_with_grades: number;
   students_passed: number;
@@ -38,7 +40,7 @@ export async function getDashboardStats(etablissementId: string, anneeScolaireId
 export async function getDashboardData(etablissementId: string, anneeScolaireId?: string | null) {
   let classesQuery = supabase
     .from('classes')
-    .select('id, nom, prix')
+    .select('id, nom, prix, frais_inscription')
     .eq('etablissement_id', etablissementId);
 
   if (anneeScolaireId) {
@@ -57,7 +59,7 @@ export async function getDashboardData(etablissementId: string, anneeScolaireId?
   while (hasMore) {
     let elevesQuery = supabase
       .from('eleves')
-      .select('id, matricule, nom, prenom, sexe, classe_id, statut, date_inscription, paiements(id, eleve_id, montant, date, type_frais, statut, reference, mode_paiement)')
+      .select('id, matricule, nom, prenom, sexe, classe_id, statut, date_inscription, est_subventionne, paiements(id, eleve_id, montant, date, type_frais, statut, reference, mode_paiement)')
       .eq('etablissement_id', etablissementId);
 
     if (anneeScolaireId) {

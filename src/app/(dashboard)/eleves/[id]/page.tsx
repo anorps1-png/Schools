@@ -10,7 +10,7 @@ import {
 } from '@/components/icons';
 import { Eleve, Paiement, NoteMatiere, TransactionPaiement, Classe, DisciplineIncident } from '@/types/domain';
 import { createClient } from '@/lib/supabase/client';
-import { addPayment, updatePayment, softDeletePayment, updateStudent } from '@/lib/queries/eleves';
+import { addPayment, updatePayment, softDeletePayment, updateStudent, toggleStudentSubvention } from '@/lib/queries/eleves';
 import { paiementSchema, validateOrThrow } from '@/lib/validation/schemas';
 import { useEtablissement } from '@/contexts/etablissement-context';
 
@@ -117,6 +117,8 @@ export default function FicheElevePage({ params }: PageProps) {
           lieuNaissance: studentData.lieu_naissance || 'Yaoundé',
           dateInscription: studentData.date_inscription,
           statut: studentData.statut,
+          estSubventionne: Boolean(studentData.est_subventionne),
+          est_subventionne: Boolean(studentData.est_subventionne),
           paiements: studentData.paiements?.map((p: any) => ({
             id: p.id,
             eleveId: p.eleve_id,
@@ -338,11 +340,15 @@ export default function FicheElevePage({ params }: PageProps) {
 
   // Financial calculations
   const classObj = classesList.find(c => c.nom === student.classeId || c.id === student.classeId);
+  const isSub = Boolean((student as any).estSubventionne ?? (student as any).est_subventionne);
   const fraisInscription = classObj ? (Number((classObj as any).frais_inscription) || 0) : 0;
 
-  // Les frais totaux annuels incluent les frais d'inscription
+  // Règle métier : l'élève subventionné paie un forfait annuel de 55 000 FCFA.
+  // L'élève standard paie les frais totaux de sa classe (incluant l'inscription).
   let rawTotalDue: number | null = null;
-  if (classObj && typeof classObj.prix === 'number') {
+  if (isSub) {
+    rawTotalDue = 55000;
+  } else if (classObj && typeof classObj.prix === 'number') {
     const tranchesTotal = tranches.reduce((sum, t) => sum + (Number(t.montant) || 0), 0);
     // Si classObj.prix correspond uniquement à la somme des tranches de scolarité, on y ajoute l'inscription
     if (tranchesTotal > 0 && Math.abs(classObj.prix - tranchesTotal) < 10) {
@@ -355,6 +361,23 @@ export default function FicheElevePage({ params }: PageProps) {
 
   const feeConfigured = rawTotalDue !== null && rawTotalDue > 0;
   const totalDue = feeConfigured ? rawTotalDue : null;
+
+  const handleToggleSubvention = async () => {
+    if (!student) return;
+    try {
+      const current = Boolean((student as any).estSubventionne ?? (student as any).est_subventionne);
+      const next = !current;
+      await toggleStudentSubvention(student.id, next);
+      setStudent({
+        ...student,
+        estSubventionne: next,
+        est_subventionne: next
+      } as any);
+      triggerToast(`Régime mis à jour : ${next ? 'Élève Subventionné (55 000 FCFA)' : 'Standard'}`);
+    } catch (err: any) {
+      alert("Erreur lors de la modification du statut : " + err.message);
+    }
+  };
 
   // Le montant payé inclut à la fois la Scolarité ET les frais d'Inscription
   const totalPaid = (student.paiements || [])
@@ -787,19 +810,33 @@ export default function FicheElevePage({ params }: PageProps) {
           </div>
         </div>
 
-        {/* Status Badge */}
-        <span className={`inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-bold border ${
-          student.statut === 'actif'
-            ? 'bg-green-bg text-green border-transparent'
-            : student.statut === 'suspendu'
-            ? 'bg-red-bg text-accent border-transparent'
-            : 'bg-chip text-ink-soft border-border'
-        }`}>
-          <span className={`w-1.5 h-1.5 rounded-full ${
-            student.statut === 'actif' ? 'bg-green' : 'bg-accent'
-          }`}></span>
-          {student.statut === 'actif' ? 'Inscrit / Actif' : 'Suspendu'}
-        </span>
+        {/* Status Badge & Subvention Toggle */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={handleToggleSubvention}
+            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border transition-colors ${
+              isSub
+                ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+                : 'bg-chip text-ink-soft border-border hover:bg-surface'
+            }`}
+            title="Cliquer pour basculer le régime subventionné / standard"
+          >
+            <span>{isSub ? '★ Subventionné (55 000 FCFA)' : 'Régime Standard'}</span>
+          </button>
+
+          <span className={`inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-bold border ${
+            student.statut === 'actif'
+              ? 'bg-green-bg text-green border-transparent'
+              : student.statut === 'suspendu'
+              ? 'bg-red-bg text-accent border-transparent'
+              : 'bg-chip text-ink-soft border-border'
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${
+              student.statut === 'actif' ? 'bg-green' : 'bg-accent'
+            }`}></span>
+            {student.statut === 'actif' ? 'Inscrit / Actif' : 'Suspendu'}
+          </span>
+        </div>
       </div>
 
       {/* Tabs list */}
@@ -941,8 +978,12 @@ export default function FicheElevePage({ params }: PageProps) {
                 </span>
                 <span className="text-[10px] text-ink-faint mt-1 block">
                   Classe : {displayClasse}
-                  {fraisInscription > 0 && totalDue !== null && (
-                    <span className="font-semibold text-ink-soft"> (dont Inscription : {formatFCFA(fraisInscription)})</span>
+                  {isSub ? (
+                    <span className="font-semibold text-blue-700"> · Plafond subventionné (55 000 FCFA)</span>
+                  ) : (
+                    fraisInscription > 0 && totalDue !== null && (
+                      <span className="font-semibold text-ink-soft"> (dont Inscription : {formatFCFA(fraisInscription)})</span>
+                    )
                   )}
                 </span>
               </div>

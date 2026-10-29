@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { SearchIcon, ChevronLeftIcon, ChevronRightIcon, PlusIcon, DownloadIcon } from '@/components/icons';
 import { Eleve, Classe } from '@/types/domain';
 import { downloadExcel } from '@/lib/excel';
-import { getStudents, createStudent, addPayment, getStudentsWidgetStats, getStudentsPaginated, type StudentsWidgetStats, type StudentPage } from '@/lib/queries/eleves';
+import { getStudents, createStudent, addPayment, getStudentsWidgetStats, getStudentsPaginated, toggleStudentSubvention, type StudentsWidgetStats, type StudentPage } from '@/lib/queries/eleves';
 import { getClasses } from '@/lib/queries/classes';
 import { useEtablissement } from '@/contexts/etablissement-context';
 import { createClient, isRunningInElectron } from '@/lib/supabase/client';
@@ -61,6 +61,7 @@ export default function ElevesPage() {
   const [birthPlace, setBirthPlace] = useState('');
   const [matricule, setMatricule] = useState('');
   const [initialPayment, setInitialPayment] = useState('');
+  const [isSubventionne, setIsSubventionne] = useState(false);
 
   // Re-enrollment modal states
   const [showReenrollModal, setShowReenrollModal] = useState(false);
@@ -69,6 +70,7 @@ export default function ElevesPage() {
   const [reenrollClassId, setReenrollClassId] = useState('');
   const [reenrollYearId, setReenrollYearId] = useState('');
   const [reenrollInitialPayment, setReenrollInitialPayment] = useState('');
+  const [reenrollIsSubventionne, setReenrollIsSubventionne] = useState(false);
   const [availableYears, setAvailableYears] = useState<any[]>([]);
   // Candidats de la recherche de réinscription. Alimentés par la RPC serveur
   // (toutes années confondues) quand elle est disponible : la liste `students`
@@ -91,6 +93,7 @@ export default function ElevesPage() {
   const [selectedClass, setSelectedClass] = useState('All');
   const [selectedPaymentStatus, setSelectedPaymentStatus] = useState('All');
   const [selectedGender, setSelectedGender] = useState('All');
+  const [selectedSubventionStatus, setSelectedSubventionStatus] = useState<'All' | 'subventionne' | 'standard'>('All');
 
   // Pagination States
   const [currentPage, setCurrentPage] = useState(1);
@@ -238,6 +241,8 @@ export default function ElevesPage() {
         lieuNaissance: d.lieu_naissance,
         dateInscription: d.date_inscription,
         statut: d.statut,
+        estSubventionne: Boolean(d.est_subventionne),
+        est_subventionne: Boolean(d.est_subventionne),
         paiements: d.paiements?.map((p: any) => ({
           id: p.id,
           eleveId: p.eleve_id,
@@ -291,6 +296,7 @@ export default function ElevesPage() {
         classeId: selectedClass === 'All' ? null : selectedClass,
         statutPaiement: selectedPaymentStatus === 'All' ? null : (selectedPaymentStatus as 'paid' | 'partial' | 'unpaid'),
         sexe: selectedGender === 'All' ? null : (selectedGender as 'M' | 'F'),
+        estSubventionne: selectedSubventionStatus === 'All' ? null : (selectedSubventionStatus === 'subventionne'),
         page: currentPage,
         pageSize,
       });
@@ -303,7 +309,7 @@ export default function ElevesPage() {
       setServerModeAvailable(false);
       setServerTableStudents(null);
     }
-  }, [etablissementId, academicYearId, debouncedSearch, selectedClass, selectedPaymentStatus, selectedGender, currentPage, pageSize]);
+  }, [etablissementId, academicYearId, debouncedSearch, selectedClass, selectedPaymentStatus, selectedGender, selectedSubventionStatus, currentPage, pageSize]);
 
   useEffect(() => {
     fetchTablePage();
@@ -331,11 +337,13 @@ export default function ElevesPage() {
   const getStudentPaymentStats = useCallback((student: Eleve) => {
     if (!student) return { totalDue: null as number | null, totalPaid: 0, status: 'unpaid' as const };
     const classObj = classesList.find(c => c.nom === student.classeId || c.id === student.classeId);
-    // prix inclut les frais d'inscription : totalDue ne doit couvrir que la
-    // scolarité, comme totalPaid ci-dessous (paiements type_frais='Scolarité').
-    const totalDue: number | null = classObj && typeof classObj.prix === 'number'
+    const isSub = Boolean((student as any).estSubventionne ?? (student as any).est_subventionne);
+    // Règle métier : l'élève subventionné paie 55 000 FCFA.
+    const rawClassDue: number | null = classObj && typeof classObj.prix === 'number'
       ? classObj.prix - (Number((classObj as any).frais_inscription) || 0)
       : null;
+    const totalDue = isSub ? 55000 : rawClassDue;
+
     const totalPaid = (student.paiements || [])
       .filter(p => p.statut === 'paid' && p.typeFrais === 'Scolarité')
       .reduce((sum, p) => sum + p.montant, 0);
@@ -371,7 +379,13 @@ export default function ElevesPage() {
         // 4. Gender
         const matchesGender = selectedGender === 'All' || student.sexe === selectedGender;
 
-        return matchesSearch && matchesClass && matchesPayment && matchesGender;
+        // 5. Régime de subvention
+        const isSub = Boolean((student as any).estSubventionne ?? (student as any).est_subventionne);
+        const matchesSubvention = selectedSubventionStatus === 'All'
+          || (selectedSubventionStatus === 'subventionne' && isSub)
+          || (selectedSubventionStatus === 'standard' && !isSub);
+
+        return matchesSearch && matchesClass && matchesPayment && matchesGender && matchesSubvention;
       })
       .sort((a, b) => {
         const nomA = (a.nom || '').trim();
@@ -382,27 +396,31 @@ export default function ElevesPage() {
         const prenomB = (b.prenom || '').trim();
         return prenomA.localeCompare(prenomB, 'fr', { sensitivity: 'base' });
       });
-  }, [studentsOfActiveYear, searchTerm, selectedClass, selectedPaymentStatus, selectedGender, isLoaded, getStudentPaymentStats]);
+  }, [studentsOfActiveYear, searchTerm, selectedClass, selectedPaymentStatus, selectedGender, selectedSubventionStatus, isLoaded, getStudentPaymentStats]);
 
   // Total counts for widgets
   // lateCount reste à 0 : ce repli client n'a pas la notion d'échéance des
   // tranches (contrairement à get_students_widget_stats). La carte « Partiel »
   // additionne les deux, donc le total reste juste dans les deux modes.
   const widgetStats = useMemo(() => {
-    if (!isLoaded) return { paidCount: 0, partialCount: 0, lateCount: 0, unpaidCount: 0, total: 0 };
+    if (!isLoaded) return { paidCount: 0, partialCount: 0, lateCount: 0, unpaidCount: 0, total: 0, subventionnesCount: 0 };
     let paidCount = 0;
     let partialCount = 0;
     let unpaidCount = 0;
+    let subventionnesCount = 0;
 
     studentsOfActiveYear.forEach(s => {
       if (!s) return;
+      if (Boolean((s as any).estSubventionne ?? (s as any).est_subventionne)) {
+        subventionnesCount++;
+      }
       const { status } = getStudentPaymentStats(s);
       if (status === 'paid') paidCount++;
       else if (status === 'partial') partialCount++;
       else unpaidCount++;
     });
 
-    return { paidCount, partialCount, lateCount: 0, unpaidCount, total: studentsOfActiveYear.length };
+    return { paidCount, partialCount, lateCount: 0, unpaidCount, total: studentsOfActiveYear.length, subventionnesCount };
   }, [studentsOfActiveYear, isLoaded, getStudentPaymentStats]);
 
 
@@ -432,6 +450,7 @@ export default function ElevesPage() {
     classeId: string;
     nomParent: string | null | undefined;
     classeNomOverride: string | null;
+    est_subventionne?: boolean;
     precomputedStats: { totalDue: number | null; totalPaid: number; status: 'paid' | 'partial' | 'unpaid' | 'late'; resteAPayerEchu?: number } | null;
   }
 
@@ -446,6 +465,7 @@ export default function ElevesPage() {
         classeId: s.classe_id,
         nomParent: s.nom_parent,
         classeNomOverride: s.classe_nom,
+        est_subventionne: Boolean(s.est_subventionne),
         precomputedStats: { totalDue: Number(s.total_due), totalPaid: Number(s.total_paid), status: s.statut_paiement, resteAPayerEchu: s.reste_a_payer_echu !== undefined && s.reste_a_payer_echu !== null ? Number(s.reste_a_payer_echu) : undefined },
       }));
     }
@@ -458,6 +478,7 @@ export default function ElevesPage() {
       classeId: s.classeId,
       nomParent: s.nomParent,
       classeNomOverride: null,
+      est_subventionne: Boolean((s as any).estSubventionne ?? (s as any).est_subventionne),
       precomputedStats: getStudentPaymentStats(s),
     }));
   }, [useServerTable, serverTableStudents, legacyPaginatedStudents, getStudentPaymentStats]);
@@ -568,6 +589,7 @@ export default function ElevesPage() {
       email_parent: parentEmail || null,
       date_naissance: dateOfBirth || null,
       lieu_naissance: birthPlace || null,
+      est_subventionne: isSubventionne,
       statut: 'actif',
       etablissement_id: etablissementId
     };
@@ -627,6 +649,8 @@ export default function ElevesPage() {
           dateInscription: d.date_inscription,
           anneeScolaireId: d.annee_scolaire_id,
           statut: d.statut,
+          estSubventionne: isSubventionne,
+          est_subventionne: isSubventionne,
           paiements: newPaymentObj ? [newPaymentObj] : [],
           notes: []
         };
@@ -651,6 +675,7 @@ export default function ElevesPage() {
     setBirthPlace('');
     setMatricule('');
     setInitialPayment('');
+    setIsSubventionne(false);
 
     setShowAddModal(false);
     triggerToast(`L'élève ${lastName} ${firstName} a été inscrit avec succès dans Supabase.`);
@@ -692,6 +717,7 @@ export default function ElevesPage() {
       date_naissance: selectedReenrollStudent.dateNaissance || null,
       lieu_naissance: selectedReenrollStudent.lieuNaissance || null,
       date_inscription: new Date().toISOString().split('T')[0],
+      est_subventionne: reenrollIsSubventionne,
       statut: 'actif',
       etablissement_id: etablissementId
     };
@@ -745,6 +771,8 @@ export default function ElevesPage() {
           lieuNaissance: d.lieu_naissance,
           dateInscription: d.date_inscription,
           statut: d.statut,
+          estSubventionne: reenrollIsSubventionne,
+          est_subventionne: reenrollIsSubventionne,
           paiements: newPayObj ? [newPayObj] : [],
           notes: []
         };
@@ -754,10 +782,28 @@ export default function ElevesPage() {
         setShowReenrollModal(false);
         setSelectedReenrollStudent(null);
         setReenrollInitialPayment('');
+        setReenrollIsSubventionne(false);
         triggerToast(`Réinscription réussie pour ${selectedReenrollStudent.nom} ${selectedReenrollStudent.prenom} (Matricule: ${d.matricule}) !`);
       }
     } catch (err: any) {
       alert("Erreur lors de la réinscription : " + err.message);
+    }
+  };
+
+  const handleToggleSubvention = async (studentId: string, currentStatus: boolean, studentName: string) => {
+    try {
+      const newStatus = !currentStatus;
+      await toggleStudentSubvention(studentId, newStatus);
+      setStudents(prev => prev.map(s => s.id === studentId ? { ...s, estSubventionne: newStatus, est_subventionne: newStatus } : s));
+      setServerTableStudents(prev => prev ? prev.map(s => s.id === studentId ? {
+        ...s,
+        est_subventionne: newStatus,
+        total_due: newStatus ? 55000 : (classesList.find(c => c.id === s.classe_id)?.prix || 0)
+      } : s) : null);
+      refreshServerViews();
+      triggerToast(`Statut mis à jour pour ${studentName} : ${newStatus ? 'Subventionné (55 000 FCFA)' : 'Standard'}.`);
+    } catch (err: any) {
+      alert("Erreur lors de la modification du statut : " + err.message);
     }
   };
 
@@ -805,6 +851,7 @@ export default function ElevesPage() {
             classeId: selectedClass === 'All' ? null : selectedClass,
             statutPaiement: selectedPaymentStatus === 'All' ? null : (selectedPaymentStatus as 'paid' | 'partial' | 'unpaid'),
             sexe: selectedGender === 'All' ? null : (selectedGender as 'M' | 'F'),
+            estSubventionne: selectedSubventionStatus === 'All' ? null : selectedSubventionStatus === 'subventionne',
             page,
             pageSize: EXPORT_PAGE_SIZE,
           });
@@ -820,6 +867,7 @@ export default function ElevesPage() {
           Prénom: s.prenom,
           Genre: s.sexe,
           Classe: s.classe_nom || classesList.find(c => c.id === s.classe_id)?.nom || s.classe_id,
+          Régime: s.est_subventionne ? 'Subventionné (55 000 FCFA)' : 'Standard',
           'Parent / Tuteur': s.nom_parent,
           Téléphone: s.telephone_parent,
           'Scolarité (FCFA)': s.total_due,
@@ -839,12 +887,14 @@ export default function ElevesPage() {
     // complète déjà chargée localement (fetchAllStudentsFallback).
     const dataToExport = filteredStudents.map(s => {
       const { totalDue, totalPaid, status } = getStudentPaymentStats(s);
+      const isSub = Boolean((s as any).estSubventionne ?? (s as any).est_subventionne);
       return {
         Matricule: s.matricule,
         Nom: s.nom,
         Prénom: s.prenom,
         Genre: s.sexe,
         Classe: classesList.find(c => c.id === s.classeId)?.nom || s.classeId,
+        Régime: isSub ? 'Subventionné (55 000 FCFA)' : 'Standard',
         'Parent / Tuteur': s.nomParent,
         Téléphone: s.telephoneParent,
         'Scolarité (FCFA)': totalDue !== null ? totalDue : 'Non configuré',
