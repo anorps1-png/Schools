@@ -1,3 +1,5 @@
+import { captureError } from '../observability/logger';
+
 export interface PrintableStudent {
   id?: string | null;
   matricule?: string | null;
@@ -299,7 +301,7 @@ export function printStudentList(options: PrintStudentListOptions): void {
   </div>
 
   <div class="footer-note">
-    Document officiel généré par School's • ${schoolName} • Page 1/1
+    Document officiel généré par School's • ${escapeHtml(schoolName)} • Page 1/1
   </div>
 </body>
 </html>`;
@@ -327,7 +329,7 @@ export function printStudentList(options: PrintStudentListOptions): void {
     try {
       iframe.contentWindow?.print();
     } catch (err) {
-      console.error("Erreur lors de l'impression :", err);
+      captureError(err, { context: "printStudentList" });
     } finally {
       setTimeout(() => {
         if (iframe.parentNode) {

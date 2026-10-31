@@ -71,15 +71,16 @@ async function getDashboardStats(params: any) {
   const nbClasses = classes.length;
 
   const classesById = new Map((await table('classes')).map((c) => [c.id, c]));
+  // Frais attendus globaux (Scolarité + Frais d'inscription) : aligné sur la
+  // facturation globale (CA Constaté) et le module Finance.
   // Règle métier : tout élève subventionné paie 55 000 FCFA.
-  // L'élève standard paie (prix - frais_inscription).
   let totalExpected = 0;
   let totalSubventions = 0;
   const subventionnesCount = eleves.filter((e) => e.est_subventionne === true).length;
 
   for (const e of eleves) {
     const c = e.classe_id ? classesById.get(e.classe_id) : null;
-    const baseTuition = c ? Math.max(0, num(c.prix) - num(c.frais_inscription)) : 0;
+    const baseTuition = c ? num(c.prix) : 0;
     if (e.est_subventionne === true) {
       totalExpected += 55000;
       totalSubventions += Math.max(0, baseTuition - 55000);
@@ -90,7 +91,7 @@ async function getDashboardStats(params: any) {
 
   const elevesIdSet = new Set(eleves.map((e) => e.id));
   const paiements = alive(await table('paiements')).filter(
-    (p) => p.etablissement_id === etabId && p.statut === 'paid' && p.type_frais === 'Scolarité' && elevesIdSet.has(p.eleve_id)
+    (p) => p.etablissement_id === etabId && p.statut === 'paid' && elevesIdSet.has(p.eleve_id)
   );
   const totalPaid = paiements.reduce((sum, p) => sum + num(p.montant), 0);
 

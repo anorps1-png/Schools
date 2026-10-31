@@ -196,30 +196,75 @@ export default function Dashboard() {
     ? serverStats.success_rate.toFixed(1)
     : '--';
 
-  // Total expected (Frais attendus pour ces élèves)
-  // Total expected (Frais attendus pour ces élèves)
+  // Total attendu global (Scolarité + Frais d'inscription)
+  // Aligné sur la facturation globale (CA Constaté) du module Finance.
+  // Règle métier : tout élève subventionné paie 55 000 FCFA.
   const totalExpected = useMemo(() => {
     const activeList = dateFilterType === 'all' ? students : filteredStudentsForExpected;
     return activeList.reduce((sum, student) => {
-      const classObj = classesList.find(c => c.id === student.classeId);
       const isSub = Boolean(student.estSubventionne ?? (student as any).est_subventionne);
       if (isSub) return sum + 55000;
-      // prix inclut les frais d'inscription : ne couvre que la scolarité ici,
-      // comme totalPaid ci-dessous (paiements type_frais='Scolarité').
+      const classObj = classesList.find(c => c.id === student.classeId);
+      return sum + (classObj?.prix || 0);
+    }, 0);
+  }, [students, filteredStudentsForExpected, classesList, dateFilterType]);
+
+  // Sous-détails Scolarité / Inscription pour affichage informatif
+  const totalScolariteExpected = useMemo(() => {
+    const activeList = dateFilterType === 'all' ? students : filteredStudentsForExpected;
+    return activeList.reduce((sum, student) => {
+      const isSub = Boolean(student.estSubventionne ?? (student as any).est_subventionne);
+      if (isSub) return sum + 55000;
+      const classObj = classesList.find(c => c.id === student.classeId);
       return sum + ((classObj?.prix || 0) - (Number((classObj as any)?.frais_inscription) || 0));
     }, 0);
   }, [students, filteredStudentsForExpected, classesList, dateFilterType]);
 
-  // Frais de scolarité perçus sur la période. Seuls les paiements 'Scolarité'
-  // comptent : totalExpected (prix des classes) ne couvre que la scolarité, et
-  // recoveryRate/totalPending comparent les deux. Compter l'inscription ou le
-  // transport ici gonflait le recouvrement affiché (même convention que la
-  // fiche élève et get_students_paginated, commit 4fc589a).
+  const totalInscriptionsExpected = useMemo(() => {
+    const activeList = dateFilterType === 'all' ? students : filteredStudentsForExpected;
+    return activeList.reduce((sum, student) => {
+      const isSub = Boolean(student.estSubventionne ?? (student as any).est_subventionne);
+      if (isSub) return sum;
+      const classObj = classesList.find(c => c.id === student.classeId);
+      return sum + (Number((classObj as any)?.frais_inscription) || 0);
+    }, 0);
+  }, [students, filteredStudentsForExpected, classesList, dateFilterType]);
+
+  // Frais perçus sur la période (tous encaissements réels validés : Scolarité + Inscription).
+  // Aligné sur le périmètre de totalExpected et la Trésorerie Perçue du module Finance.
   const totalPaid = useMemo(() => {
     return students.reduce((sum, student) => {
       const studentPaid = (student.paiements || [])
         .filter(p => {
+          if (p.statut !== 'paid') return false;
+          if (dateFilterType === 'all') return true;
+          const pd = parseLocalDate(p.date);
+          return pd && pd >= dateRange.start && pd <= dateRange.end;
+        })
+        .reduce((s, p) => s + p.montant, 0);
+      return sum + studentPaid;
+    }, 0);
+  }, [students, dateRange, dateFilterType]);
+
+  const totalScolaritePaid = useMemo(() => {
+    return students.reduce((sum, student) => {
+      const studentPaid = (student.paiements || [])
+        .filter(p => {
           if (p.statut !== 'paid' || p.typeFrais !== 'Scolarité') return false;
+          if (dateFilterType === 'all') return true;
+          const pd = parseLocalDate(p.date);
+          return pd && pd >= dateRange.start && pd <= dateRange.end;
+        })
+        .reduce((s, p) => s + p.montant, 0);
+      return sum + studentPaid;
+    }, 0);
+  }, [students, dateRange, dateFilterType]);
+
+  const totalInscriptionsPaid = useMemo(() => {
+    return students.reduce((sum, student) => {
+      const studentPaid = (student.paiements || [])
+        .filter(p => {
+          if (p.statut !== 'paid' || p.typeFrais !== 'Inscription') return false;
           if (dateFilterType === 'all') return true;
           const pd = parseLocalDate(p.date);
           return pd && pd >= dateRange.start && pd <= dateRange.end;
@@ -234,7 +279,7 @@ export default function Dashboard() {
     return filteredStudentsForExpected.reduce((sum, student) => {
       const studentPaid = (student.paiements || [])
         .filter(p => {
-          if (p.statut !== 'paid' || p.typeFrais !== 'Scolarité') return false;
+          if (p.statut !== 'paid') return false;
           if (dateFilterType === 'all') return true;
           const pd = parseLocalDate(p.date);
           return pd && pd >= dateRange.start && pd <= dateRange.end;
@@ -249,20 +294,14 @@ export default function Dashboard() {
     if (dateFilterType === 'all') {
       const allPaid = students.reduce((sum, student) => {
         const studentPaid = (student.paiements || [])
-          .filter(p => p.statut === 'paid' && p.typeFrais === 'Scolarité')
+          .filter(p => p.statut === 'paid')
           .reduce((s, p) => s + p.montant, 0);
         return sum + studentPaid;
       }, 0);
-      const allExpected = students.reduce((sum, student) => {
-        const classObj = classesList.find(c => c.id === student.classeId);
-        const isSub = Boolean(student.estSubventionne ?? (student as any).est_subventionne);
-        if (isSub) return sum + 55000;
-        return sum + ((classObj?.prix || 0) - (Number((classObj as any)?.frais_inscription) || 0));
-      }, 0);
-      return Math.max(0, allExpected - allPaid);
+      return Math.max(0, totalExpected - allPaid);
     }
     return Math.max(0, totalExpected - totalPaidByFilteredStudents);
-  }, [dateFilterType, students, classesList, totalExpected, totalPaidByFilteredStudents]);
+  }, [dateFilterType, students, totalExpected, totalPaidByFilteredStudents]);
 
   const subventionnesCount = useMemo(() => {
     return serverStats?.subventionnes_count ?? students.filter(s => Boolean(s.estSubventionne ?? (s as any).est_subventionne)).length;
@@ -313,15 +352,15 @@ export default function Dashboard() {
       const expected = studentsInClass.reduce((acc, s) => {
         const isSub = Boolean(s.estSubventionne ?? (s as any).est_subventionne);
         if (isSub) return acc + 55000;
-        return acc + ((c.prix || 0) - (Number((c as any)?.frais_inscription) || 0));
+        return acc + (c.prix || 0);
       }, 0);
 
-      // Payments received in the period for all students in this class
+      // Payments received in the period for all students in this class (all fees to match class expected price)
       const studentsAllInClass = students.filter(s => s.classeId === c.id);
       const paid = studentsAllInClass.reduce((sum, s) => {
         const studentPaidInPeriod = (s.paiements || [])
           .filter(p => {
-            if (p.statut !== 'paid' || p.typeFrais !== 'Scolarité') return false;
+            if (p.statut !== 'paid') return false;
             if (dateFilterType === 'all') return true;
             const pd = parseLocalDate(p.date);
             return pd && pd >= dateRange.start && pd <= dateRange.end;
@@ -334,7 +373,7 @@ export default function Dashboard() {
       const paidByNewStudentsInPeriod = studentsInClass.reduce((sum, s) => {
         const studentPaidInPeriod = (s.paiements || [])
           .filter(p => {
-            if (p.statut !== 'paid' || p.typeFrais !== 'Scolarité') return false;
+            if (p.statut !== 'paid') return false;
             if (dateFilterType === 'all') return true;
             const pd = parseLocalDate(p.date);
             return pd && pd >= dateRange.start && pd <= dateRange.end;
@@ -523,6 +562,13 @@ export default function Dashboard() {
                 style={{ width: `${Math.min(100, recoveryRate)}%`, background: recoveryRate >= 75 ? 'var(--color-ink)' : 'var(--color-accent)' }}
               ></div>
             </div>
+            {totalInscriptionsPaid > 0 && (
+              <div className="text-[11px] text-ink-faint font-medium mt-2 flex flex-wrap gap-x-2">
+                <span>Scolarité : {formatFCFA(totalScolaritePaid)}</span>
+                <span>·</span>
+                <span>Inscriptions : {formatFCFA(totalInscriptionsPaid)}</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -534,6 +580,13 @@ export default function Dashboard() {
             <span className="text-[13px] font-semibold bg-cream/15 rounded-pill px-3 py-1 inline-block">
               Sur {formatFCFA(totalExpected)} attendus
             </span>
+            {totalInscriptionsExpected > 0 && (
+              <div className="text-[11px] opacity-75 font-medium mt-1.5 flex flex-wrap gap-x-2">
+                <span>Scolarité : {formatFCFA(totalScolariteExpected)}</span>
+                <span>·</span>
+                <span>Inscriptions : {formatFCFA(totalInscriptionsExpected)}</span>
+              </div>
+            )}
             {totalSubventions > 0 && (
               <span className="text-[11px] text-cream/70 font-medium">
                 Dont {formatFCFA(totalSubventions)} subventionnés pris en charge

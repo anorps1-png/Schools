@@ -207,11 +207,11 @@ export async function softDeletePayment(payId: string) {
  * Mise à jour des informations générales d'un élève.
  */
 export async function updateStudent(id: string, studentData: Record<string, any>) {
-  validateOrThrow(eleveSchema.partial(), studentData, 'Élève invalide');
+  const validated = validateOrThrow(eleveSchema.partial(), studentData, 'Élève invalide');
 
   const { data, error } = await supabase
     .from('eleves')
-    .update(studentData)
+    .update(validated)
     .eq('id', id)
     .select();
 

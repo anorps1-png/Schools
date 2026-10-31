@@ -204,12 +204,18 @@ export default function ClassesPage() {
     event.stopPropagation();
 
     try {
+      let elevesQuery = supabase
+        .from('eleves')
+        .select('*')
+        .eq('classe_id', cls.id)
+        .eq('etablissement_id', etablissementId);
+
+      if (academicYearId) {
+        elevesQuery = elevesQuery.eq('annee_scolaire_id', academicYearId);
+      }
+
       const [{ data: elevesData }, { data: etabData }] = await Promise.all([
-        supabase
-          .from('eleves')
-          .select('*')
-          .eq('classe_id', cls.id)
-          .eq('etablissement_id', etablissementId),
+        elevesQuery,
         supabase
           .from('etablissements')
           .select('nom, adresse, telephone, email, logo_url')
