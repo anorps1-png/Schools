@@ -335,14 +335,18 @@ async function getFinanceAccountBalances(params: any) {
   if (anneeId) elevesScope = elevesScope.filter((e) => e.annee_scolaire_id === anneeId);
   const elevesScopeInfo = elevesScope.map((e) => {
     const c = e.classe_id ? classesById.get(e.classe_id) : null;
-    return { id: e.id, prix: num(c?.prix), frais_inscription: num(c?.frais_inscription) };
+    const isSub = e.est_subventionne === true;
+    const totalDue = isSub ? 55000 : num(c?.prix);
+    const fraisInsc = isSub ? 0 : num(c?.frais_inscription);
+    const scolarite = Math.max(0, totalDue - fraisInsc);
+    return { id: e.id, scolarite, frais_inscription: fraisInsc };
   });
 
   const constatationFrais: { compte_numero: string; debit: number; credit: number }[] = [];
   for (const e of elevesScopeInfo) {
-    if (e.prix > 0) {
-      constatationFrais.push({ compte_numero: '411', debit: e.prix, credit: 0 });
-      constatationFrais.push({ compte_numero: '706', debit: 0, credit: e.prix });
+    if (e.scolarite > 0) {
+      constatationFrais.push({ compte_numero: '411', debit: e.scolarite, credit: 0 });
+      constatationFrais.push({ compte_numero: '706', debit: 0, credit: e.scolarite });
     }
     if (e.frais_inscription > 0) {
       constatationFrais.push({ compte_numero: '411', debit: e.frais_inscription, credit: 0 });

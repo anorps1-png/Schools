@@ -454,9 +454,11 @@ export default function FinancePage() {
         const isSub = Boolean(student.estSubventionne ?? student.est_subventionne);
         const matchedClass = loadedClasses.find((c: any) => c.id === student.classeId || c.nom === student.classeId);
         const standardPrice = matchedClass ? Number(matchedClass.prix || 0) : 200000;
-        const classPrice = isSub ? 55000 : standardPrice;
+        const totalDue = isSub ? 55000 : standardPrice;
+        const fraisInscription = isSub ? 0 : (matchedClass ? Number(matchedClass.frais_inscription || 0) : 0);
+        const fraisScolarite = Math.max(0, totalDue - fraisInscription);
         
-        if (classPrice > 0) {
+        if (fraisScolarite > 0) {
           const dateConst = student.dateInscription ? student.dateInscription.split('T')[0] : '2025-09-01';
           paymentEcritures.push({
             id: `ecr-const-${student.id}`,
@@ -464,18 +466,15 @@ export default function FinancePage() {
             libelle: `Constatation Frais Scolaires${isSub ? ' (Subventionné)' : ''} - ${student.nom} ${student.prenom}`,
             reference: `FACT-${student.matricule}`,
             lignes: [
-              { compteNumero: '411', debit: classPrice, credit: 0 },
-              { compteNumero: '706', debit: 0, credit: classPrice }
+              { compteNumero: '411', debit: fraisScolarite, credit: 0 },
+              { compteNumero: '706', debit: 0, credit: fraisScolarite }
             ]
           });
         }
 
-        // Constatation des frais d'inscription : même compte 706 que la
-        // scolarité (les deux sont des prestations de services de l'école),
-        // pour que la Trésorerie Perçue (qui inclut l'inscription) se
-        // rapproche d'un CA Constaté qui couvre le même périmètre.
-        // Les élèves subventionnés bénéficient d'un forfait conventionné (0 F inscription supplémentaire).
-        const fraisInscription = isSub ? 0 : (matchedClass ? Number(matchedClass.frais_inscription || 0) : 0);
+        // Constatation des frais d'inscription (compte 706) :
+        // La somme scolarité nette + inscription équivaut exactement à totalDue (classes.prix
+        // ou 55 000 F pour subventionné), assurant la parfaite égalité avec le Tableau de Bord.
         if (fraisInscription > 0) {
           const dateConst = student.dateInscription ? student.dateInscription.split('T')[0] : '2025-09-01';
           paymentEcritures.push({
