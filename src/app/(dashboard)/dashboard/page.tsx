@@ -6,11 +6,13 @@ import Link from 'next/link';
 import { Eleve, Classe } from '@/types/domain';
 import { getDashboardData, getDashboardStats, type DashboardStats } from '@/lib/queries/dashboard';
 import { downloadExcel } from '@/lib/excel';
-import { DownloadIcon } from '@/components/icons';
+import { DownloadIcon, SearchIcon } from '@/components/icons';
 import { useEtablissement } from '@/contexts/etablissement-context';
+import { createClient } from '@/lib/supabase/client';
+import { printSubventionnesList, type PrintableSubventionneStudent } from '@/lib/print/printStudentList';
 
 export default function Dashboard() {
-  const { etablissementId, academicYearId } = useEtablissement();
+  const { etablissementId, academicYearId, academicYear } = useEtablissement();
   const [students, setStudents] = useState<Eleve[]>([]);
   const [classesList, setClassesList] = useState<Classe[]>([]);
   const [teachersList, setTeachersList] = useState<any[]>([]);
@@ -22,6 +24,13 @@ export default function Dashboard() {
   const [dateFilterType, setDateFilterType] = useState<string>('all');
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
+
+  // Modale interactive : Liste des élèves subventionnés
+  const [showSubventionnesModal, setShowSubventionnesModal] = useState(false);
+  const [subventionSearch, setSubventionSearch] = useState('');
+  const [subventionClasseFilter, setSubventionClasseFilter] = useState('All');
+  const [subventionStatutFilter, setSubventionStatutFilter] = useState('All');
+  const [isPrintingSubventionnes, setIsPrintingSubventionnes] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && etablissementId) {
@@ -50,6 +59,8 @@ export default function Dashboard() {
             statut: d.statut,
             estSubventionne: Boolean(d.est_subventionne),
             est_subventionne: Boolean(d.est_subventionne),
+            nomParent: d.nom_parent || '',
+            telephoneParent: d.telephone_parent || '',
             dateInscription: d.date_inscription ? d.date_inscription.split('T')[0] : '',
             paiements: d.paiements?.map((p: any) => ({
               id: p.id,
@@ -337,6 +348,134 @@ export default function Dashboard() {
     return new Intl.NumberFormat('fr-FR').format(amount) + ' FCFA';
   };
 
+  // Formatage FCFA exact (sans abréviation en Millions) pour les tableaux et reçus détaillés
+  const formatFCFAExact = (amount: number) => {
+    return new Intl.NumberFormat('fr-FR').format(amount) + ' FCFA';
+  };
+
+  // Liste enrichie des élèves subventionnés
+  const allSubventionnes = useMemo(() => {
+    return students
+      .filter(s => Boolean(s.estSubventionne ?? (s as any).est_subventionne))
+      .map(s => {
+        const classeObj = classesList.find(c => c.id === s.classeId);
+        const classeNom = classeObj?.nom || s.classeId || 'Non assignée';
+        const totalPaid = (s.paiements || [])
+          .filter(p => p.statut === 'paid')
+          .reduce((sum, p) => sum + p.montant, 0);
+        const forfait = 55000;
+        const resteDu = Math.max(0, forfait - totalPaid);
+        const statutPaiement: 'Soldé' | 'Partiel' | 'Non payé' = totalPaid >= forfait ? 'Soldé' : totalPaid > 0 ? 'Partiel' : 'Non payé';
+        return {
+          id: s.id,
+          matricule: s.matricule || '—',
+          nom: s.nom || '',
+          prenom: s.prenom || '',
+          sexe: s.sexe || '—',
+          classeId: s.classeId,
+          classeNom,
+          forfait,
+          totalPaid,
+          resteDu,
+          statutPaiement,
+          nomParent: (s as any).nomParent || (s as any).nom_parent || '',
+          telephoneParent: (s as any).telephoneParent || (s as any).telephone_parent || '',
+        };
+      })
+      .sort((a, b) => {
+        const c = a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' });
+        if (c !== 0) return c;
+        return (a.prenom || '').localeCompare(b.prenom || '', 'fr', { sensitivity: 'base' });
+      });
+  }, [students, classesList]);
+
+  const filteredSubventionnes = useMemo(() => {
+    return allSubventionnes.filter(s => {
+      const q = subventionSearch.trim().toLowerCase();
+      const matchSearch = !q || `${s.nom} ${s.prenom} ${s.matricule} ${s.classeNom}`.toLowerCase().includes(q);
+      const matchClasse = subventionClasseFilter === 'All' || s.classeId === subventionClasseFilter;
+      const matchStatut = subventionStatutFilter === 'All' || s.statutPaiement === subventionStatutFilter;
+      return matchSearch && matchClasse && matchStatut;
+    });
+  }, [allSubventionnes, subventionSearch, subventionClasseFilter, subventionStatutFilter]);
+
+  const subventionnesSummary = useMemo(() => {
+    const total = allSubventionnes.length;
+    const totalForfait = allSubventionnes.reduce((sum, s) => sum + s.forfait, 0);
+    const totalPaid = allSubventionnes.reduce((sum, s) => sum + s.totalPaid, 0);
+    const totalReste = allSubventionnes.reduce((sum, s) => sum + s.resteDu, 0);
+    const soldes = allSubventionnes.filter(s => s.statutPaiement === 'Soldé').length;
+    const partiels = allSubventionnes.filter(s => s.statutPaiement === 'Partiel').length;
+    const nonPayes = allSubventionnes.filter(s => s.statutPaiement === 'Non payé').length;
+    return { total, totalForfait, totalPaid, totalReste, soldes, partiels, nonPayes };
+  }, [allSubventionnes]);
+
+  const handlePrintSubventionnes = async () => {
+    setIsPrintingSubventionnes(true);
+    try {
+      let etabInfo: any = null;
+      if (etablissementId) {
+        try {
+          const supabase = createClient();
+          const { data } = await supabase
+            .from('etablissements')
+            .select('nom, adresse, telephone, email, logo_url')
+            .eq('id', etablissementId)
+            .single();
+          if (data) etabInfo = data;
+        } catch {
+          // ignore
+        }
+      }
+
+      const listToPrint: PrintableSubventionneStudent[] = (filteredSubventionnes.length > 0 ? filteredSubventionnes : allSubventionnes).map(s => ({
+        matricule: s.matricule,
+        nom: s.nom,
+        prenom: s.prenom,
+        sexe: s.sexe,
+        classeNom: s.classeNom,
+        forfait: s.forfait,
+        totalPaid: s.totalPaid,
+        resteDu: s.resteDu,
+        statutPaiement: s.statutPaiement,
+        nomParent: s.nomParent,
+        telephoneParent: s.telephoneParent,
+      }));
+
+      printSubventionnesList({
+        schoolName: etabInfo?.nom,
+        schoolLogo: etabInfo?.logo_url,
+        schoolAddress: etabInfo?.adresse,
+        schoolPhone: etabInfo?.telephone,
+        schoolEmail: etabInfo?.email,
+        academicYear: academicYear || undefined,
+        totalSubventionsPrisesEnCharge: totalSubventions,
+        students: listToPrint
+      });
+    } finally {
+      setIsPrintingSubventionnes(false);
+    }
+  };
+
+  const handleExportSubventionnesExcel = () => {
+    const listToExport = filteredSubventionnes.length > 0 ? filteredSubventionnes : allSubventionnes;
+    const dataToExport = listToExport.map((s, idx) => ({
+      'N°': idx + 1,
+      'Matricule': s.matricule,
+      'Nom': s.nom,
+      'Prénom': s.prenom,
+      'Sexe': s.sexe,
+      'Classe': s.classeNom,
+      'Forfait Annuel (FCFA)': s.forfait,
+      'Montant Encaissé (FCFA)': s.totalPaid,
+      'Reste à Payer (FCFA)': s.resteDu,
+      'Statut': s.statutPaiement,
+      'Parent / Tuteur': s.nomParent,
+      'Téléphone Parent': s.telephoneParent
+    }));
+    downloadExcel(dataToExport, `Registre_Eleves_Subventionnes_${new Date().toISOString().split('T')[0]}`);
+  };
+
   // Group by class for charts
   const classStats = useMemo(() => {
     return classesList.map(c => {
@@ -522,9 +661,15 @@ export default function Dashboard() {
               <span className="text-[13px] font-bold text-ink-soft bg-chip rounded-pill px-3 py-1">Réussite {globalSuccessRate}%</span>
             )}
             {subventionnesCount > 0 && (
-              <span className="text-[13px] font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-pill px-3 py-1">
-                {subventionnesCount} subventionné{subventionnesCount > 1 ? 's' : ''}
-              </span>
+              <button
+                type="button"
+                onClick={() => setShowSubventionnesModal(true)}
+                className="text-[13px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-pill px-3 py-1 inline-flex items-center gap-1.5 transition-all shadow-sm cursor-pointer group"
+                title="Cliquer pour afficher et imprimer la liste des élèves subventionnés"
+              >
+                <span>★ {subventionnesCount} subventionné{subventionnesCount > 1 ? 's' : ''}</span>
+                <span className="text-[10px] text-blue-500 group-hover:translate-x-0.5 transition-transform">↗</span>
+              </button>
             )}
           </div>
           {dateFilterType !== 'all' && (
@@ -588,9 +733,15 @@ export default function Dashboard() {
               </div>
             )}
             {totalSubventions > 0 && (
-              <span className="text-[11px] text-cream/70 font-medium">
-                Dont {formatFCFA(totalSubventions)} subventionnés pris en charge
-              </span>
+              <button
+                type="button"
+                onClick={() => setShowSubventionnesModal(true)}
+                className="text-[11px] text-cream/80 hover:text-white font-medium flex items-center justify-between gap-1 transition-colors text-left group cursor-pointer pt-1"
+                title="Cliquer pour afficher et imprimer la liste des élèves subventionnés"
+              >
+                <span>Dont {formatFCFA(totalSubventions)} subventionnés pris en charge</span>
+                <span className="underline opacity-80 group-hover:opacity-100 font-bold ml-1 shrink-0">Voir liste ↗</span>
+              </button>
             )}
           </div>
         </div>
@@ -820,6 +971,248 @@ export default function Dashboard() {
           </table>
         </div>
       </div>
+
+      {/* Modale interactive : Liste officielle des élèves subventionnés */}
+      {showSubventionnesModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-surface rounded-card border border-border shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden animate-scale-up">
+            {/* Entête de la modale */}
+            <div className="p-6 border-b border-border bg-bg/40 flex items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="w-8 h-8 rounded-control bg-blue-100 text-blue-800 flex items-center justify-center font-extrabold text-sm border border-blue-200">
+                    ★
+                  </span>
+                  <h2 className="text-xl sm:text-2xl font-extrabold text-ink tracking-tight">
+                    Élèves au Régime Subventionné
+                  </h2>
+                  <span className="text-xs font-bold px-3 py-1 rounded-pill bg-blue-50 text-blue-700 border border-blue-200">
+                    Forfait Spécial 55 000 FCFA
+                  </span>
+                </div>
+                <p className="mt-1.5 text-xs sm:text-sm text-ink-soft">
+                  Registre officiel des bénéficiaires de la convention de scolarité subventionnée (55 000 FCFA forfait annuel par élève).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSubventionnesModal(false)}
+                className="p-2 text-ink-faint hover:text-ink hover:bg-chip rounded-control transition-colors cursor-pointer"
+                title="Fermer"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Barre de métriques KPI */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 sm:p-6 bg-surface border-b border-border">
+              <div className="bg-bg p-3.5 rounded-card border border-border">
+                <span className="text-[11px] font-bold text-ink-faint uppercase block">Effectif subventionné</span>
+                <span className="text-xl sm:text-2xl font-extrabold text-ink block mt-1">
+                  {subventionnesSummary.total} élève{subventionnesSummary.total > 1 ? 's' : ''}
+                </span>
+                <span className="text-[11px] text-ink-faint font-medium mt-0.5 block">
+                  {subventionnesSummary.soldes} soldé(s) · {subventionnesSummary.partiels} partiel(s)
+                </span>
+              </div>
+              <div className="bg-bg p-3.5 rounded-card border border-border">
+                <span className="text-[11px] font-bold text-ink-faint uppercase block">Forfait global attendu</span>
+                <span className="text-xl sm:text-2xl font-extrabold text-blue-700 block mt-1">
+                  {formatFCFAExact(subventionnesSummary.totalForfait)}
+                </span>
+                <span className="text-[11px] text-ink-faint font-medium mt-0.5 block">
+                  55 000 FCFA × {subventionnesSummary.total}
+                </span>
+              </div>
+              <div className="bg-bg p-3.5 rounded-card border border-border">
+                <span className="text-[11px] font-bold text-ink-faint uppercase block">Total déjà encaissé</span>
+                <span className="text-xl sm:text-2xl font-extrabold text-green block mt-1">
+                  {formatFCFAExact(subventionnesSummary.totalPaid)}
+                </span>
+                <span className="text-[11px] text-green font-medium mt-0.5 block">
+                  {subventionnesSummary.totalForfait > 0 ? ((subventionnesSummary.totalPaid / subventionnesSummary.totalForfait) * 100).toFixed(1) : '0'}% recouvré
+                </span>
+              </div>
+              <div className="bg-bg p-3.5 rounded-card border border-border">
+                <span className="text-[11px] font-bold text-ink-faint uppercase block">Reste à recouvrer</span>
+                <span className={`text-xl sm:text-2xl font-extrabold block mt-1 ${subventionnesSummary.totalReste > 0 ? 'text-accent' : 'text-ink-soft'}`}>
+                  {formatFCFAExact(subventionnesSummary.totalReste)}
+                </span>
+                <span className="text-[11px] text-ink-faint font-medium mt-0.5 block">
+                  Subvention : {formatFCFA(totalSubventions)}
+                </span>
+              </div>
+            </div>
+
+            {/* Filtres et actions */}
+            <div className="p-4 sm:px-6 bg-surface border-b border-border flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2.5 flex-1">
+                {/* Recherche */}
+                <div className="relative flex-1 min-w-[200px]">
+                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-ink-faint pointer-events-none">
+                    <SearchIcon size={14} />
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="Rechercher par nom, matricule ou classe..."
+                    value={subventionSearch}
+                    onChange={(e) => setSubventionSearch(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 text-xs border border-border rounded-control bg-bg text-ink placeholder:text-ink-faint outline-none focus:border-accent focus:bg-surface"
+                  />
+                </div>
+
+                {/* Filtre classe */}
+                <select
+                  value={subventionClasseFilter}
+                  onChange={(e) => setSubventionClasseFilter(e.target.value)}
+                  className="bg-bg border border-border px-3 py-2 rounded-control text-xs font-bold text-ink-soft outline-none focus:border-accent cursor-pointer"
+                >
+                  <option value="All">Toutes les classes</option>
+                  {classesList.map(c => (
+                    <option key={c.id} value={c.id}>{c.nom}</option>
+                  ))}
+                </select>
+
+                {/* Filtre statut */}
+                <select
+                  value={subventionStatutFilter}
+                  onChange={(e) => setSubventionStatutFilter(e.target.value)}
+                  className="bg-bg border border-border px-3 py-2 rounded-control text-xs font-bold text-ink-soft outline-none focus:border-accent cursor-pointer"
+                >
+                  <option value="All">Tous les paiements</option>
+                  <option value="Soldé">Soldé</option>
+                  <option value="Partiel">Partiel</option>
+                  <option value="Non payé">Non payé</option>
+                </select>
+              </div>
+
+              {/* Boutons d'export et d'impression */}
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleExportSubventionnesExcel}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-border text-ink-soft hover:text-ink text-xs font-bold rounded-control bg-bg hover:bg-chip transition-colors cursor-pointer"
+                  title="Exporter au format Excel"
+                >
+                  <DownloadIcon size={13} />
+                  Excel
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePrintSubventionnes}
+                  disabled={isPrintingSubventionnes}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-control shadow transition-colors cursor-pointer disabled:opacity-50"
+                  title="Imprimer la liste officielle pour visa et archives"
+                >
+                  <span>🖨️</span>
+                  <span>{isPrintingSubventionnes ? 'Génération...' : 'Imprimer la liste'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Tableau défilant */}
+            <div className="flex-1 overflow-y-auto min-h-[260px] p-0">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead className="sticky top-0 bg-bg text-ink-faint font-bold uppercase tracking-wider border-b border-border z-10">
+                  <tr>
+                    <th className="px-4 py-3 text-center w-10">N°</th>
+                    <th className="px-4 py-3 w-28">Matricule</th>
+                    <th className="px-4 py-3">Élève</th>
+                    <th className="px-4 py-3 text-center w-12">Genre</th>
+                    <th className="px-4 py-3">Classe</th>
+                    <th className="px-4 py-3 text-right">Forfait</th>
+                    <th className="px-4 py-3 text-right">Encaissé</th>
+                    <th className="px-4 py-3 text-right">Reste</th>
+                    <th className="px-4 py-3 text-center">Statut</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border-row">
+                  {filteredSubventionnes.length > 0 ? (
+                    filteredSubventionnes.map((s, idx) => {
+                      const isSolde = s.statutPaiement === 'Soldé';
+                      const isPartiel = s.statutPaiement === 'Partiel';
+                      return (
+                        <tr key={s.id} className="hover:bg-row-hover transition-colors">
+                          <td className="px-4 py-3 text-center font-bold text-ink-faint">{idx + 1}</td>
+                          <td className="px-4 py-3 font-mono font-semibold text-ink-soft whitespace-nowrap">{s.matricule}</td>
+                          <td className="px-4 py-3">
+                            <div className="font-bold text-ink">{s.nom} {s.prenom}</div>
+                            {s.nomParent && (
+                              <div className="text-[10px] text-ink-faint">Parent: {s.nomParent} {s.telephoneParent ? `(${s.telephoneParent})` : ''}</div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-center font-semibold text-ink-soft">{s.sexe}</td>
+                          <td className="px-4 py-3 font-semibold text-ink-soft">{s.classeNom}</td>
+                          <td className="px-4 py-3 text-right font-mono font-bold text-blue-700">{formatFCFAExact(s.forfait)}</td>
+                          <td className="px-4 py-3 text-right font-mono font-bold text-green">{formatFCFAExact(s.totalPaid)}</td>
+                          <td className={`px-4 py-3 text-right font-mono font-bold ${s.resteDu > 0 ? 'text-accent' : 'text-ink-faint'}`}>
+                            {formatFCFAExact(s.resteDu)}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`inline-block px-2.5 py-0.5 rounded-pill text-[10px] font-extrabold ${
+                              isSolde
+                                ? 'bg-green-bg text-green'
+                                : isPartiel
+                                ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                : 'bg-red-bg text-accent'
+                            }`}>
+                              {s.statutPaiement}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                            <Link
+                              href={`/eleves/${s.id}`}
+                              className="text-accent hover:underline font-bold text-[11px]"
+                            >
+                              Fiche →
+                            </Link>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={10} className="px-6 py-12 text-center text-ink-faint italic">
+                        {allSubventionnes.length === 0
+                          ? "Aucun élève n'est enregistré au régime subventionné."
+                          : "Aucun élève ne correspond aux critères de recherche."}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Bas de modale */}
+            <div className="p-4 sm:px-6 border-t border-border bg-bg/40 flex items-center justify-between gap-3 flex-wrap">
+              <span className="text-xs text-ink-soft font-medium">
+                Affichage de {filteredSubventionnes.length} élève{filteredSubventionnes.length > 1 ? 's' : ''} sur {allSubventionnes.length} subventionné{allSubventionnes.length > 1 ? 's' : ''}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSubventionnesModal(false)}
+                  className="px-4 py-2 border border-border text-ink-soft hover:text-ink text-xs font-bold rounded-control bg-surface hover:bg-chip transition-colors cursor-pointer"
+                >
+                  Fermer
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePrintSubventionnes}
+                  disabled={isPrintingSubventionnes}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-control shadow transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  <span>🖨️</span>
+                  <span>Imprimer la liste officielle</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -55,11 +55,10 @@ export async function getDashboardData(etablissementId: string, anneeScolaireId?
   let from = 0;
   const step = 1000;
   let hasMore = true;
-
   while (hasMore) {
     let elevesQuery = supabase
       .from('eleves')
-      .select('id, matricule, nom, prenom, sexe, classe_id, statut, date_inscription, est_subventionne, paiements(id, eleve_id, montant, date, type_frais, statut, reference, mode_paiement)')
+      .select('id, matricule, nom, prenom, sexe, classe_id, statut, date_inscription, est_subventionne, nom_parent, telephone_parent, paiements(id, eleve_id, montant, date, type_frais, statut, reference, mode_paiement)')
       .eq('etablissement_id', etablissementId);
 
     if (anneeScolaireId) {

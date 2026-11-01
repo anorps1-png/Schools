@@ -839,6 +839,35 @@ export default function FicheElevePage({ params }: PageProps) {
         </div>
       </div>
 
+      {/* Bannière explicative si élève subventionné */}
+      {isSub && (
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-card p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-3">
+            <span className="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-base shrink-0 shadow-sm">
+              ★
+            </span>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm font-extrabold text-blue-950">Régime Subventionné Pris en Charge</h3>
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-200/80 text-blue-900">
+                  Forfait Annuel : 55 000 FCFA
+                </span>
+              </div>
+              <p className="text-xs text-blue-800/90 mt-0.5">
+                Cet élève bénéficie de la convention spéciale de scolarité subventionnée. L&apos;établissement prend en charge le reliquat au titre de la subvention.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleToggleSubvention}
+            className="text-xs font-bold text-blue-700 hover:text-blue-900 hover:underline shrink-0 text-left sm:text-right"
+          >
+            Changer de régime
+          </button>
+        </div>
+      )}
+
       {/* Tabs list */}
       <div className="flex border-b border-border">
         <button

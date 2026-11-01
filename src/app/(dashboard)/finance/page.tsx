@@ -326,6 +326,8 @@ export default function FinancePage() {
             emailParent: e.email_parent,
             dateInscription: e.date_inscription,
             statut: e.statut,
+            estSubventionne: Boolean(e.est_subventionne),
+            est_subventionne: Boolean(e.est_subventionne),
             paiements: (e.paiements || []).map((p: any) => ({
               id: p.id,
               eleveId: p.eleve_id,
@@ -449,15 +451,17 @@ export default function FinancePage() {
       const paymentEcritures: EcritureComptable[] = [];
       loadedStudents.forEach((student: Eleve) => {
         if (!student) return;
+        const isSub = Boolean(student.estSubventionne ?? student.est_subventionne);
         const matchedClass = loadedClasses.find((c: any) => c.id === student.classeId || c.nom === student.classeId);
-        const classPrice = matchedClass ? Number(matchedClass.prix || 0) : 200000;
+        const standardPrice = matchedClass ? Number(matchedClass.prix || 0) : 200000;
+        const classPrice = isSub ? 55000 : standardPrice;
         
         if (classPrice > 0) {
           const dateConst = student.dateInscription ? student.dateInscription.split('T')[0] : '2025-09-01';
           paymentEcritures.push({
             id: `ecr-const-${student.id}`,
             date: dateConst,
-            libelle: `Constatation Frais Scolaires - ${student.nom} ${student.prenom}`,
+            libelle: `Constatation Frais Scolaires${isSub ? ' (Subventionné)' : ''} - ${student.nom} ${student.prenom}`,
             reference: `FACT-${student.matricule}`,
             lignes: [
               { compteNumero: '411', debit: classPrice, credit: 0 },
@@ -470,7 +474,8 @@ export default function FinancePage() {
         // scolarité (les deux sont des prestations de services de l'école),
         // pour que la Trésorerie Perçue (qui inclut l'inscription) se
         // rapproche d'un CA Constaté qui couvre le même périmètre.
-        const fraisInscription = matchedClass ? Number(matchedClass.frais_inscription || 0) : 0;
+        // Les élèves subventionnés bénéficient d'un forfait conventionné (0 F inscription supplémentaire).
+        const fraisInscription = isSub ? 0 : (matchedClass ? Number(matchedClass.frais_inscription || 0) : 0);
         if (fraisInscription > 0) {
           const dateConst = student.dateInscription ? student.dateInscription.split('T')[0] : '2025-09-01';
           paymentEcritures.push({

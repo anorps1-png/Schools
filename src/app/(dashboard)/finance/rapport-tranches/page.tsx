@@ -29,6 +29,7 @@ interface TrancheStudent {
   tranche3Paid: boolean;
   tranche3Amount: number;
   pctToPay: number;
+  estSubventionne?: boolean;
 }
 
 export default function RapportTranchesPage() {
@@ -42,6 +43,7 @@ export default function RapportTranchesPage() {
   // Filters (Slicers like Excel)
   const [selectedClass, setSelectedClass] = useState<string>('All');
   const [selectedSection, setSelectedSection] = useState<string>('All');
+  const [selectedRegime, setSelectedRegime] = useState<'All' | 'subventionne' | 'standard'>('All');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [relanceOnly, setRelanceOnly] = useState<boolean>(false);
 
@@ -115,8 +117,10 @@ export default function RapportTranchesPage() {
         if (elevesData) {
           const mapped: TrancheStudent[] = elevesData.map((e: any) => {
             const classObj = e.classes || {};
+            const isSub = Boolean(e.est_subventionne);
 
-            const totalDue = Number(classObj.prix) || 150000;
+            // Règle métier : l'élève subventionné paie le forfait conventionné de 55 000 FCFA
+            const totalDue = isSub ? 55000 : (Number(classObj.prix) || 150000);
             
             // Calculate tranche limits based on real configured tranches if present
             let t1Limit = Math.round(totalDue * 0.33);
@@ -185,7 +189,8 @@ export default function RapportTranchesPage() {
               tranche2Amount: t2Amount,
               tranche3Paid,
               tranche3Amount: t3Amount,
-              pctToPay
+              pctToPay,
+              estSubventionne: isSub
             };
           });
 
@@ -218,11 +223,14 @@ export default function RapportTranchesPage() {
       const matchSearch = `${s.nom} ${s.prenom} ${s.matricule}`.toLowerCase().includes(searchTerm.toLowerCase());
       const matchClass = selectedClass === 'All' || s.classeNom === selectedClass;
       const matchSection = selectedSection === 'All' || s.sectionNom.toUpperCase().includes(selectedSection.toUpperCase());
+      const matchRegime = selectedRegime === 'All'
+        || (selectedRegime === 'subventionne' && s.estSubventionne)
+        || (selectedRegime === 'standard' && !s.estSubventionne);
       const matchRelance = !relanceOnly || s.pctToPay > 0;
 
-      return matchSearch && matchClass && matchSection && matchRelance;
+      return matchSearch && matchClass && matchSection && matchRegime && matchRelance;
     });
-  }, [students, searchTerm, selectedClass, selectedSection, relanceOnly]);
+  }, [students, searchTerm, selectedClass, selectedSection, selectedRegime, relanceOnly]);
 
   // Totals for header KPI
   const stats = useMemo(() => {
@@ -239,6 +247,7 @@ export default function RapportTranchesPage() {
   const handleExportExcelReport = () => {
     const dataToExport = filteredStudents.map(s => ({
       'FULL NAME': `${s.nom} ${s.prenom}`,
+      'RÉGIME': s.estSubventionne ? 'Subventionné (55 000 FCFA)' : 'Standard',
       'CLASS': s.classeNom,
       'SECTION': s.sectionNom,
       'MATRICULE': s.matricule,
@@ -264,7 +273,8 @@ export default function RapportTranchesPage() {
     }
     const cleanPhone = student.telephoneParent.replace(/[^0-9]/g, '');
     const formattedPhone = cleanPhone.startsWith('237') ? cleanPhone : `237${cleanPhone}`;
-    const msg = `Bonjour M./Mme ${student.nomParent}, nous vous rappellons que le solde de scolarité pour l'élève ${student.nom} ${student.prenom} (Matricule: ${student.matricule}, Classe: ${student.classeNom}) présente un reste à payer de ${new Intl.NumberFormat('fr-FR').format(student.totalDue - student.totalPaid)} FCFA (${student.pctToPay}% restant). Merci de régulariser la tranche en trésorerie.`;
+    const regimeTag = student.estSubventionne ? ' (Régime Subventionné)' : '';
+    const msg = `Bonjour M./Mme ${student.nomParent}, nous vous rappellons que le solde de scolarité pour l'élève ${student.nom} ${student.prenom} (Matricule: ${student.matricule}, Classe: ${student.classeNom}${regimeTag}) présente un reste à payer de ${new Intl.NumberFormat('fr-FR').format(student.totalDue - student.totalPaid)} FCFA (${student.pctToPay}% restant). Merci de régulariser la tranche en trésorerie.`;
 
     window.open(`https://wa.me/${formattedPhone}?text=${encodeURIComponent(msg)}`, '_blank');
   };
@@ -357,11 +367,12 @@ export default function RapportTranchesPage() {
           <div className="bg-surface p-5 rounded-card border border-border shadow-sm space-y-5">
             <h3 className="text-sm font-extrabold text-ink border-b border-border pb-2.5 flex items-center justify-between">
               <span>Slicers & Filtres (Excel)</span>
-              {(selectedClass !== 'All' || selectedSection !== 'All' || relanceOnly || searchTerm) && (
+              {(selectedClass !== 'All' || selectedSection !== 'All' || selectedRegime !== 'All' || relanceOnly || searchTerm) && (
                 <button
                   onClick={() => {
                     setSelectedClass('All');
                     setSelectedSection('All');
+                    setSelectedRegime('All');
                     setSearchTerm('');
                     setRelanceOnly(false);
                   }}
@@ -451,6 +462,44 @@ export default function RapportTranchesPage() {
               </div>
             </div>
 
+            {/* Slicer 3: RÉGIME */}
+            <div>
+              <label className="block text-[11px] font-bold text-ink-faint uppercase tracking-wider mb-2">RÉGIME SCOLAIRE</label>
+              <div className="space-y-1">
+                <button
+                  onClick={() => setSelectedRegime('All')}
+                  className={`w-full text-left px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center justify-between ${
+                    selectedRegime === 'All' ? 'bg-ink text-cream' : 'bg-bg text-ink-soft hover:bg-chip'
+                  }`}
+                >
+                  <span>Tous les régimes</span>
+                  <span className="text-[10px] opacity-80">{students.length}</span>
+                </button>
+                <button
+                  onClick={() => setSelectedRegime('subventionne')}
+                  className={`w-full text-left px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center justify-between ${
+                    selectedRegime === 'subventionne' ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-50 text-blue-800 hover:bg-blue-100 border border-blue-200'
+                  }`}
+                >
+                  <span>★ Subventionnés (55k)</span>
+                  <span className="text-[10px] font-mono opacity-80">
+                    {students.filter(s => s.estSubventionne).length}
+                  </span>
+                </button>
+                <button
+                  onClick={() => setSelectedRegime('standard')}
+                  className={`w-full text-left px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center justify-between ${
+                    selectedRegime === 'standard' ? 'bg-accent text-cream shadow-sm' : 'bg-bg text-ink hover:bg-chip'
+                  }`}
+                >
+                  <span>Régime Standard</span>
+                  <span className="text-[10px] font-mono opacity-80">
+                    {students.filter(s => !s.estSubventionne).length}
+                  </span>
+                </button>
+              </div>
+            </div>
+
             {/* Checkbox filter for Relances */}
             <div className="pt-2 border-t border-border">
               <label className="flex items-center gap-2 cursor-pointer">
@@ -496,10 +545,24 @@ export default function RapportTranchesPage() {
                 <tbody className="divide-y divide-border-row text-xs">
                   {filteredStudents.length > 0 ? (
                     filteredStudents.map((s) => (
-                      <tr key={s.id} className="hover:bg-row-hover transition-colors">
+                      <tr
+                        key={s.id}
+                        className={`transition-colors ${
+                          s.estSubventionne
+                            ? 'bg-blue-50/40 hover:bg-blue-50/70 border-l-4 border-l-blue-600'
+                            : 'hover:bg-row-hover'
+                        }`}
+                      >
                         {/* FULL NAME */}
                         <td className="px-4 py-3 font-extrabold text-ink whitespace-nowrap">
-                          {s.nom} {s.prenom}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span>{s.nom} {s.prenom}</span>
+                            {s.estSubventionne && (
+                              <span className="inline-flex items-center gap-0.5 text-[9px] font-extrabold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200">
+                                ★ Subv. (55k)
+                              </span>
+                            )}
+                          </div>
                         </td>
 
                         {/* CLASS */}

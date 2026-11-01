@@ -88,6 +88,7 @@ export default function ClasseDetailPage({ params }: { params: Promise<{ id: str
 
   const classAvg = countAvg > 0 ? (sumAvg / countAvg).toFixed(2) : '--';
   const successRate = countAvg > 0 ? ((passed / countAvg) * 100).toFixed(1) : '--';
+  const subventionnesCount = students.filter(s => Boolean((s as any).est_subventionne || s.estSubventionne)).length;
 
   const handlePrintClassList = () => {
     printStudentList({
@@ -111,6 +112,7 @@ export default function ClasseDetailPage({ params }: { params: Promise<{ id: str
         nomParent: s.nom_parent || s.nomParent,
         telephoneParent: s.telephone_parent || s.telephoneParent,
         classeNom: classe.nom,
+        estSubventionne: Boolean(s.est_subventionne || s.estSubventionne),
       })),
       additionalInfo: [
         { label: 'Enseignant Principal', value: classe.enseignant_principal_id || 'Non assigné' },
@@ -170,9 +172,14 @@ export default function ClasseDetailPage({ params }: { params: Promise<{ id: str
       {/* Liste des Élèves */}
       <div className="bg-surface p-6 rounded-card shadow-sm border border-border">
         <div className="flex items-center justify-between border-b pb-2 mb-4 flex-wrap gap-2">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <h2 className="text-lg font-bold">Liste des Élèves</h2>
             <span className="text-xs font-bold bg-chip text-ink px-2 py-1 rounded">{students.length} Inscrits</span>
+            {subventionnesCount > 0 && (
+              <span className="text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-1 rounded-pill">
+                ★ {subventionnesCount} subventionné{subventionnesCount > 1 ? 's' : ''}
+              </span>
+            )}
           </div>
           <button
             onClick={handlePrintClassList}
@@ -195,19 +202,38 @@ export default function ClasseDetailPage({ params }: { params: Promise<{ id: str
               </tr>
             </thead>
             <tbody className="divide-y divide-border-row text-sm">
-              {students.map(student => (
-                <tr key={student.id} className="hover:bg-bg/30">
-                  <td className="px-4 py-3 text-ink-soft font-mono text-xs">{student.matricule}</td>
-                  <td className="px-4 py-3 font-semibold text-ink">{student.nom} {student.prenom}</td>
-                  <td className="px-4 py-3">{student.sexe === 'M' ? 'Garçon' : 'Fille'}</td>
-                  <td className="px-4 py-3 text-ink-soft">{(student as any).date_naissance || student.dateNaissance || '—'}</td>
-                  <td className="px-4 py-3 text-right">
-                    <Link href={`/eleves/${encodeURIComponent(student.id)}`} className="inline-block px-3 py-1.5 bg-chip hover:bg-chip text-ink-soft font-semibold rounded-control text-xs transition-colors">
-                      Voir profil
-                    </Link>
-                  </td>
-                </tr>
-              ))}
+              {students.map(student => {
+                const isSub = Boolean((student as any).est_subventionne || student.estSubventionne);
+                return (
+                  <tr
+                    key={student.id}
+                    className={`transition-colors ${
+                      isSub
+                        ? 'bg-blue-50/40 hover:bg-blue-50/70 border-l-4 border-l-blue-600'
+                        : 'hover:bg-bg/30'
+                    }`}
+                  >
+                    <td className="px-4 py-3 text-ink-soft font-mono text-xs">{student.matricule}</td>
+                    <td className="px-4 py-3 font-semibold text-ink">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span>{student.nom} {student.prenom}</span>
+                        {isSub && (
+                          <span className="inline-flex items-center gap-0.5 text-[9px] font-extrabold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200">
+                            ★ Subventionné
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">{student.sexe === 'M' ? 'Garçon' : 'Fille'}</td>
+                    <td className="px-4 py-3 text-ink-soft">{(student as any).date_naissance || student.dateNaissance || '—'}</td>
+                    <td className="px-4 py-3 text-right">
+                      <Link href={`/eleves/${encodeURIComponent(student.id)}`} className="inline-block px-3 py-1.5 bg-chip hover:bg-chip text-ink-soft font-semibold rounded-control text-xs transition-colors">
+                        Voir profil
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })}
               {students.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-4 py-8 text-center text-ink-faint italic">

@@ -1960,7 +1960,26 @@ export default function ElevesPage() {
       {/* Cartes statistiques */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
         <div className="bg-surface border border-border p-6 rounded-card">
-          <span className="text-[13px] font-bold text-ink-soft block">Effectif total</span>
+          <div className="flex items-center justify-between">
+            <span className="text-[13px] font-bold text-ink-soft block">Effectif total</span>
+            {(effectiveWidgetStats.subventionnesCount ?? 0) > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedSubventionStatus(prev => prev === 'subventionne' ? 'All' : 'subventionne');
+                  setCurrentPage(1);
+                }}
+                className={`text-[11px] font-extrabold px-2.5 py-0.5 rounded-full border transition-all cursor-pointer ${
+                  selectedSubventionStatus === 'subventionne'
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                    : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+                }`}
+                title="Filtrer uniquement les élèves subventionnés"
+              >
+                ★ {effectiveWidgetStats.subventionnesCount} subventionné{(effectiveWidgetStats.subventionnesCount ?? 0) > 1 ? 's' : ''}
+              </button>
+            )}
+          </div>
           <span className="text-[38px] font-extrabold text-ink tracking-[-1.5px] mt-2 block">{effectiveWidgetStats.total}</span>
         </div>
         <div className="bg-surface border border-border p-6 rounded-card">
@@ -2011,6 +2030,23 @@ export default function ElevesPage() {
               {classesOfActiveYear.map(c => (
                 <option key={c.id} value={c.id}>{c.nom}</option>
               ))}
+            </select>
+
+            <select
+              value={selectedSubventionStatus}
+              onChange={(e) => {
+                setSelectedSubventionStatus(e.target.value as 'All' | 'subventionne' | 'standard');
+                setCurrentPage(1);
+              }}
+              className={`w-full sm:w-auto border px-3.5 py-2.5 rounded-control text-[13px] font-bold outline-none focus:border-accent cursor-pointer transition-colors ${
+                selectedSubventionStatus === 'subventionne'
+                  ? 'bg-blue-50 border-blue-300 text-blue-700'
+                  : 'bg-bg border-border text-ink-soft'
+              }`}
+            >
+              <option value="All">Tous les régimes</option>
+              <option value="subventionne">★ Subventionnés (55 000 F)</option>
+              <option value="standard">Régime Standard</option>
             </select>
 
             <select
@@ -2066,18 +2102,36 @@ export default function ElevesPage() {
                   const progressPct = totalDue !== null && totalDue > 0 ? (totalPaid / totalDue) * 100 : 0;
 
                   return (
-                    <tr key={student.id} className="border-t border-border-row hover:bg-row-hover transition-colors">
+                    <tr
+                      key={student.id}
+                      className={`border-t border-border-row transition-colors ${
+                        student.est_subventionne
+                          ? 'bg-blue-50/40 hover:bg-blue-50/70 border-l-4 border-l-blue-600'
+                          : 'hover:bg-row-hover'
+                      }`}
+                    >
                       {/* Nom */}
                       <td className="px-6 py-3.5">
                         <div className="flex items-center gap-3">
-                          <div className="w-[38px] h-[38px] rounded-[12px] bg-chip text-ink-soft font-extrabold text-xs flex items-center justify-center shrink-0">
+                          <div className={`w-[38px] h-[38px] rounded-[12px] font-extrabold text-xs flex items-center justify-center shrink-0 ${
+                            student.est_subventionne
+                              ? 'bg-blue-100 text-blue-800'
+                              : 'bg-chip text-ink-soft'
+                          }`}>
                             {(student.prenom || '')[0] || ''}{(student.nom || '')[0] || ''}
                           </div>
                           <div className="min-w-0">
-                            <span className="font-bold text-ink block truncate">
-                              {student.nom} {student.prenom}
-                            </span>
-                            <span className="text-[11px] text-ink-faint block truncate">Parent : {student.nomParent}</span>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-bold text-ink block truncate">
+                                {student.nom} {student.prenom}
+                              </span>
+                              {student.est_subventionne && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200">
+                                  ★ Subventionné
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[11px] text-ink-faint block truncate">Parent : {student.nomParent || 'Non renseigné'}</span>
                           </div>
                         </div>
                       </td>
@@ -2101,7 +2155,10 @@ export default function ElevesPage() {
                       <td className="px-4 py-3.5">
                         <div className="w-48">
                           <div className="text-[12px] font-semibold text-ink-soft mb-1.5 flex justify-between">
-                            <span>{formatFCFA(totalPaid)} / {totalDue !== null ? formatFCFA(totalDue) : 'Non configuré'}</span>
+                            <span>{formatFCFA(totalPaid)} / {student.est_subventionne ? '55 000 FCFA' : (totalDue !== null ? formatFCFA(totalDue) : 'Non configuré')}</span>
+                            {student.est_subventionne && (
+                              <span className="text-blue-700 text-[10px] font-bold">Forfait</span>
+                            )}
                             {student.precomputedStats?.resteAPayerEchu !== undefined && student.precomputedStats.resteAPayerEchu > 0 && (
                               <span className="text-accent text-[10px] font-bold">Arriéré: {formatFCFA(student.precomputedStats.resteAPayerEchu)}</span>
                             )}
